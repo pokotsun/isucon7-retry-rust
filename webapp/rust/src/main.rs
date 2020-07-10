@@ -47,6 +47,10 @@ async fn welcome(session: Session, req: HttpRequest) -> Result<HttpResponse> {
 #[get("initialize")]
 async fn get_initialize(pool: web::Data<MySqlPool>) -> Result<HttpResponse> {
     sqlx::query("DELETE FROM user WHERE id > 1000").execute(pool.get_ref()).await.ok();
+    sqlx::query("DELETE FROM image WHERE id > 1001").execute(pool.get_ref()).await.ok();
+    sqlx::query("DELETE FROM channel WHERE id > 10").execute(pool.get_ref()).await.ok();
+    sqlx::query("DELETE FROM message WHERE id > 10000").execute(pool.get_ref()).await.ok();
+    sqlx::query("DELETE FROM haveread").execute(pool.get_ref()).await.ok();
     
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
