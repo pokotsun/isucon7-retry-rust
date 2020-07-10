@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate actix_web;
 extern crate sqlx;
+extern crate tera;
 
 use std::{env, io};
 
@@ -9,13 +10,17 @@ use actix_session::{CookieSession, Session};
 use actix_utils::mpsc;
 use actix_web::http::{header, Method, StatusCode};
 use actix_web::{
-    error, guard, middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer,
-    Result,
+    error, guard, middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer, Result,
 };
 use bytes::Bytes;
 
 use sqlx::mysql::MySqlPool;
+use tera::Tera;
 
+struct Context {
+    db_pool: MySqlPool,
+    templates: tera::Tera,
+}
 
 /// favicon handler
 #[get("/favicon")]
@@ -45,14 +50,37 @@ async fn welcome(session: Session, req: HttpRequest) -> Result<HttpResponse> {
 }
 
 #[get("initialize")]
-async fn get_initialize(pool: web::Data<MySqlPool>) -> Result<HttpResponse> {
-    sqlx::query("DELETE FROM user WHERE id > 1000").execute(pool.get_ref()).await.unwrap();
-    sqlx::query("DELETE FROM image WHERE id > 1001").execute(pool.get_ref()).await.unwrap();
-    sqlx::query("DELETE FROM channel WHERE id > 10").execute(pool.get_ref()).await.unwrap();
-    sqlx::query("DELETE FROM message WHERE id > 10000").execute(pool.get_ref()).await.unwrap();
-    sqlx::query("DELETE FROM haveread").execute(pool.get_ref()).await.unwrap();
+async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
+    let pool = &data.db_pool;
+    sqlx::query("DELETE FROM user WHERE id > 1000").execute(pool).await.unwrap();
+    sqlx::query("DELETE FROM image WHERE id > 1001").execute(pool).await.unwrap();
+    sqlx::query("DELETE FROM channel WHERE id > 10").execute(pool).await.unwrap();
+    sqlx::query("DELETE FROM message WHERE id > 10000").execute(pool).await.unwrap();
+    sqlx::query("DELETE FROM haveread").execute(pool).await.unwrap();
     
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
+}
+
+#[get("index")]
+async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
+    // let templates = Tera::new("static/*").unwrap();
+    let templates = &data.templates;
+
+    if let Some(_) = session.get::<i32>("user_id")? {
+        return Ok(HttpResponse::build(StatusCode::SEE_OTHER)
+                    .header("Location", "/channel/1")
+                    .finish()
+                 );
+    }
+    let mut ctx = tera::Context::new();
+    ctx.insert("channel_id", &-1);
+    let view = templates.render("index.html.tera", &ctx)
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(view)
+      )
 }
 
 /// 404 handler
@@ -84,24 +112,29 @@ async fn main() -> io::Result<()> {
     env::set_var("RUST_LOG", "actix_web=debug,actix_server=info");
     env_logger::init();
 
+    // database connection
     let database_url = "mysql://isucon:isucon@127.0.0.1:3306/isubata?parseTime=true&loc=Local&charset=utf8mb4";
     let pool = MySqlPool::builder()
         .max_size(5) // maximum number of connections in the pool
         .build(&database_url).await.unwrap();
 
     HttpServer::new(move || {
+        // static ディレクトリを指定して, Teraを初期化
+        let templates = Tera::new("static/**/*").unwrap();
+
         App::new()
             // setup DB pool to be used with web::Data<Pool> extractor
-            .data(pool.clone())
+            .data(Context {  db_pool: pool.clone(), templates: templates.clone(), })
             // cookie session middleware
             .wrap(CookieSession::signed(&[0; 32]).secure(false))
             // enable logger - always register actix-web Logger middleware last
             .wrap(middleware::Logger::default())
             // register favicon
             .service(favicon)
+            .service(get_initialize)
+            .service(get_index)
             // register simple route, handle all methods
             .service(welcome)
-            .service(get_initialize)
             // with path parameters
             .service(web::resource("/user/{name}").route(web::get().to(with_param)))
             // async response body
@@ -122,7 +155,7 @@ async fn main() -> io::Result<()> {
                 )
             }))
             // static files
-            .service(fs::Files::new("/static", "static").show_files_listing())
+            // .service(fs::Files::new("/static", "static").show_files_listing())
             // redirect
             .service(web::resource("/").route(web::get().to(|req: HttpRequest| {
                 println!("{:?}", req);
