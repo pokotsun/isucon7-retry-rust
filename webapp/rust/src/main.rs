@@ -2,6 +2,7 @@
 extern crate actix_web;
 extern crate sqlx;
 extern crate tera;
+extern crate chrono;
 
 use std::{env, io};
 
@@ -15,11 +16,29 @@ use actix_web::{
 use bytes::Bytes;
 
 use sqlx::mysql::MySqlPool;
+use sqlx::mysql::MySqlQueryAs;
 use tera::Tera;
 
 struct Context {
     db_pool: MySqlPool,
     templates: tera::Tera,
+}
+
+#[derive(sqlx::FromRow)]
+struct User {
+    id: u64,
+    name: String,
+    salt: String,
+    password: String,
+    display_name: String,
+    avator_icon: String,
+}
+
+async fn get_user(pool: MySqlPool, user_id: u64) -> Result<User, sqlx::Error> {
+    let user = sqlx::query_as("SELECT * FROM user WHERE id = ?")
+        .bind(user_id)
+        .fetch_one(&pool).await.unwrap();
+    return Ok(user);
 }
 
 /// favicon handler
@@ -63,14 +82,10 @@ async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
 
 #[get("index")]
 async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
-    // let templates = Tera::new("static/*").unwrap();
     let templates = &data.templates;
 
     if let Some(_) = session.get::<i32>("user_id")? {
-        return Ok(HttpResponse::build(StatusCode::SEE_OTHER)
-                    .header("Location", "/channel/1")
-                    .finish()
-                 );
+        return Ok(redirect_to(&"/channel/1").await);
     }
     let mut ctx = tera::Context::new();
     ctx.insert("channel_id", &-1);
@@ -83,9 +98,19 @@ async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpRes
       )
 }
 
-/// 404 handler
-async fn p404() -> Result<fs::NamedFile> {
+// #[get("/icons/:file_name")]
+// async fn get_icon() -> Result<HttpResponse> {
+//     
+// }
+
+async fn not_found() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
+}
+
+async fn redirect_to(path: &str) -> HttpResponse {
+    HttpResponse::build(StatusCode::SEE_OTHER)
+        .header(header::LOCATION, path)
+        .finish()
 }
 
 /// response body
@@ -155,19 +180,17 @@ async fn main() -> io::Result<()> {
                 )
             }))
             // static files
-            // .service(fs::Files::new("/static", "static").show_files_listing())
+            .service(fs::Files::new("/static", "static").show_files_listing())
             // redirect
             .service(web::resource("/").route(web::get().to(|req: HttpRequest| {
                 println!("{:?}", req);
-                HttpResponse::Found()
-                    .header(header::LOCATION, "static/welcome.html")
-                    .finish()
+                return redirect_to("static/welcome.html");
             })))
             // default
             .default_service(
                 // 404 for GET request
                 web::resource("")
-                    .route(web::get().to(p404))
+                    .route(web::get().to(not_found))
                     // all requests that are not `GET`
                     .route(
                         web::route()
