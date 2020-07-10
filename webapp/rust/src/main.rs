@@ -120,7 +120,7 @@ async fn main() -> io::Result<()> {
 
     HttpServer::new(move || {
         // static ディレクトリを指定して, Teraを初期化
-        let templates = Tera::new("static/**/*").unwrap();
+        let templates = Tera::new("template/*").unwrap();
 
         App::new()
             // setup DB pool to be used with web::Data<Pool> extractor
