@@ -46,11 +46,11 @@ async fn welcome(session: Session, req: HttpRequest) -> Result<HttpResponse> {
 
 #[get("initialize")]
 async fn get_initialize(pool: web::Data<MySqlPool>) -> Result<HttpResponse> {
-    sqlx::query("DELETE FROM user WHERE id > 1000").execute(pool.get_ref()).await.ok();
-    sqlx::query("DELETE FROM image WHERE id > 1001").execute(pool.get_ref()).await.ok();
-    sqlx::query("DELETE FROM channel WHERE id > 10").execute(pool.get_ref()).await.ok();
-    sqlx::query("DELETE FROM message WHERE id > 10000").execute(pool.get_ref()).await.ok();
-    sqlx::query("DELETE FROM haveread").execute(pool.get_ref()).await.ok();
+    sqlx::query("DELETE FROM user WHERE id > 1000").execute(pool.get_ref()).await.unwrap();
+    sqlx::query("DELETE FROM image WHERE id > 1001").execute(pool.get_ref()).await.unwrap();
+    sqlx::query("DELETE FROM channel WHERE id > 10").execute(pool.get_ref()).await.unwrap();
+    sqlx::query("DELETE FROM message WHERE id > 10000").execute(pool.get_ref()).await.unwrap();
+    sqlx::query("DELETE FROM haveread").execute(pool.get_ref()).await.unwrap();
     
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
@@ -87,7 +87,7 @@ async fn main() -> io::Result<()> {
     let database_url = "root:root@tcp(127.0.0.1:3306)/isubata?parseTime=true&loc=Local&charset=utf8mb4";
     let pool = MySqlPool::builder()
         .max_size(5) // maximum number of connections in the pool
-        .build(&database_url).await.ok();
+        .build(&database_url).await.unwrap();
 
     HttpServer::new(move || {
         App::new()
