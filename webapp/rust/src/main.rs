@@ -46,7 +46,7 @@ async fn welcome(session: Session, req: HttpRequest) -> Result<HttpResponse> {
 
 #[get("initialize")]
 async fn get_initialize(pool: web::Data<MySqlPool>) -> Result<HttpResponse> {
-    sqlx::query("DELETE FROM user WHERE id > 1000").execute(pool.get_ref());
+    sqlx::query("DELETE FROM user WHERE id > 1000").execute(pool.get_ref()).await.ok();
     
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
