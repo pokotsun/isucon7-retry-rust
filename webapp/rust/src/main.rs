@@ -84,7 +84,7 @@ async fn main() -> io::Result<()> {
     env::set_var("RUST_LOG", "actix_web=debug,actix_server=info");
     env_logger::init();
 
-    let database_url = "root:root@tcp(127.0.0.1:3306)/isubata?parseTime=true&loc=Local&charset=utf8mb4";
+    let database_url = "mysql://isucon:isucon@127.0.0.1:3306/isubata?parseTime=true&loc=Local&charset=utf8mb4";
     let pool = MySqlPool::builder()
         .max_size(5) // maximum number of connections in the pool
         .build(&database_url).await.unwrap();
