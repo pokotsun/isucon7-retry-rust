@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate actix_web;
+extern crate sqlx;
 
 use std::{env, io};
 
@@ -12,6 +13,9 @@ use actix_web::{
     Result,
 };
 use bytes::Bytes;
+
+use sqlx::mysql::MySqlPool;
+
 
 /// favicon handler
 #[get("/favicon")]
@@ -38,6 +42,13 @@ async fn welcome(session: Session, req: HttpRequest) -> Result<HttpResponse> {
     Ok(HttpResponse::build(StatusCode::OK)
         .content_type("text/html; charset=utf-8")
         .body(include_str!("../static/welcome.html")))
+}
+
+#[get("initialize")]
+async fn get_initialize(pool: web::Data<MySqlPool>) -> Result<HttpResponse> {
+    sqlx::query("DELETE FROM user WHERE id > 1000").execute(pool.get_ref());
+    
+    Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
 
 /// 404 handler
@@ -69,8 +80,15 @@ async fn main() -> io::Result<()> {
     env::set_var("RUST_LOG", "actix_web=debug,actix_server=info");
     env_logger::init();
 
-    HttpServer::new(|| {
+    let database_url = "root:root@tcp(127.0.0.1:3306)/isubata?parseTime=true&loc=Local&charset=utf8mb4";
+    let pool = MySqlPool::builder()
+        .max_size(5) // maximum number of connections in the pool
+        .build(&database_url).await.ok();
+
+    HttpServer::new(move || {
         App::new()
+            // setup DB pool to be used with web::Data<Pool> extractor
+            .data(pool.clone())
             // cookie session middleware
             .wrap(CookieSession::signed(&[0; 32]).secure(false))
             // enable logger - always register actix-web Logger middleware last
@@ -79,6 +97,7 @@ async fn main() -> io::Result<()> {
             .service(favicon)
             // register simple route, handle all methods
             .service(welcome)
+            .service(get_initialize)
             // with path parameters
             .service(web::resource("/user/{name}").route(web::get().to(with_param)))
             // async response body
@@ -120,7 +139,7 @@ async fn main() -> io::Result<()> {
                     ),
             )
     })
-    .bind("127.0.0.1:8000")?
+    .bind("127.0.0.1:5000")?
     .run()
     .await
 }
