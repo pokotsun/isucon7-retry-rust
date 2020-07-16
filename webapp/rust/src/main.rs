@@ -15,6 +15,8 @@ use actix_web::{
 };
 use bytes::Bytes;
 
+use serde::{Deserialize, Serialize};
+use chrono::NaiveDateTime;
 use sqlx::mysql::MySqlPool;
 use sqlx::mysql::MySqlQueryAs;
 use tera::Tera;
@@ -80,6 +82,24 @@ async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
 
+#[get("message")]
+async fn get_message(data: web::Data<Context>) -> Result<HttpResponse> {
+    let pool = &data.db_pool;
+    let messages = sqlx::query_as::<_, Message>("SELECT * From message ORDER BY id DESC LIMIT 100").fetch_all(pool).await.unwrap();
+    Ok(HttpResponse::build(StatusCode::OK)
+        .content_type("text/html; charset=utf-8")
+        .body( serde_json::to_string(&messages).unwrap() ))
+}
+
+#[derive(sqlx::FromRow, Serialize, Deserialize)]
+struct Message {
+    id: i64,
+    channel_id: i64,
+    user_id: i64,
+    content: String,
+    created_at: NaiveDateTime,
+}
+
 #[get("index")]
 async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let templates = &data.templates;
@@ -97,11 +117,6 @@ async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpRes
         .body(view)
       )
 }
-
-// #[get("/icons/:file_name")]
-// async fn get_icon() -> Result<HttpResponse> {
-//     
-// }
 
 async fn not_found() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
@@ -138,7 +153,7 @@ async fn main() -> io::Result<()> {
     env_logger::init();
 
     // database connection
-    let database_url = "mysql://isucon:isucon@127.0.0.1:3306/isubata?parseTime=true&loc=Local&charset=utf8mb4";
+    let database_url = "mysql://isucon:isucon@192.168.33.10:3306/isubata?parseTime=true&loc=Local&charset=utf8mb4";
     let pool = MySqlPool::builder()
         .max_size(5) // maximum number of connections in the pool
         .build(&database_url).await.unwrap();
@@ -158,10 +173,12 @@ async fn main() -> io::Result<()> {
             .service(favicon)
             .service(get_initialize)
             .service(get_index)
+            .service(get_message)
             // register simple route, handle all methods
             .service(welcome)
             // with path parameters
             .service(web::resource("/user/{name}").route(web::get().to(with_param)))
+
             // async response body
             .service(
                 web::resource("/async-body/{name}").route(web::get().to(response_body)),
