@@ -1,8 +1,8 @@
 #[macro_use]
 extern crate actix_web;
+extern crate chrono;
 extern crate sqlx;
 extern crate tera;
-extern crate chrono;
 
 use std::{env, io};
 
@@ -15,8 +15,8 @@ use actix_web::{
 };
 use bytes::Bytes;
 
-use serde::{Deserialize, Serialize};
 use chrono::NaiveDateTime;
+use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlPool;
 use sqlx::mysql::MySqlQueryAs;
 use tera::Tera;
@@ -28,18 +28,21 @@ struct Context {
 
 #[derive(sqlx::FromRow)]
 struct User {
-    id: u64,
+    id: i64,
     name: String,
     salt: String,
     password: String,
     display_name: String,
     avator_icon: String,
+    created_at: NaiveDateTime,
 }
 
 async fn get_user(pool: MySqlPool, user_id: u64) -> Result<User, sqlx::Error> {
     let user = sqlx::query_as("SELECT * FROM user WHERE id = ?")
         .bind(user_id)
-        .fetch_one(&pool).await.unwrap();
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     return Ok(user);
 }
 
@@ -73,22 +76,40 @@ async fn welcome(session: Session, req: HttpRequest) -> Result<HttpResponse> {
 #[get("initialize")]
 async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
     let pool = &data.db_pool;
-    sqlx::query("DELETE FROM user WHERE id > 1000").execute(pool).await.unwrap();
-    sqlx::query("DELETE FROM image WHERE id > 1001").execute(pool).await.unwrap();
-    sqlx::query("DELETE FROM channel WHERE id > 10").execute(pool).await.unwrap();
-    sqlx::query("DELETE FROM message WHERE id > 10000").execute(pool).await.unwrap();
-    sqlx::query("DELETE FROM haveread").execute(pool).await.unwrap();
-    
+    sqlx::query("DELETE FROM user WHERE id > 1000")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM image WHERE id > 1001")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM channel WHERE id > 10")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM message WHERE id > 10000")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM haveread")
+        .execute(pool)
+        .await
+        .unwrap();
+
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
 
 #[get("message")]
 async fn get_message(data: web::Data<Context>) -> Result<HttpResponse> {
     let pool = &data.db_pool;
-    let messages = sqlx::query_as::<_, Message>("SELECT * From message ORDER BY id DESC LIMIT 100").fetch_all(pool).await.unwrap();
+    let messages = sqlx::query_as::<_, Message>("SELECT * From message ORDER BY id DESC LIMIT 100")
+        .fetch_all(pool)
+        .await
+        .unwrap();
     Ok(HttpResponse::build(StatusCode::OK)
         .content_type("text/html; charset=utf-8")
-        .body( serde_json::to_string(&messages).unwrap() ))
+        .body(serde_json::to_string(&messages).unwrap()))
 }
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
@@ -109,13 +130,13 @@ async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpRes
     }
     let mut ctx = tera::Context::new();
     ctx.insert("channel_id", &-1);
-    let view = templates.render("index.html.tera", &ctx)
+    let view = templates
+        .render("index.html.tera", &ctx)
         .map_err(|e| error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(view)
-      )
+        .body(view))
 }
 
 async fn not_found() -> Result<fs::NamedFile> {
@@ -153,10 +174,13 @@ async fn main() -> io::Result<()> {
     env_logger::init();
 
     // database connection
-    let database_url = "mysql://isucon:isucon@192.168.33.10:3306/isubata?parseTime=true&loc=Local&charset=utf8mb4";
+    let database_url =
+        "mysql://isucon:isucon@192.168.33.10:3306/isubata?parseTime=true&loc=Local&charset=utf8mb4";
     let pool = MySqlPool::builder()
         .max_size(5) // maximum number of connections in the pool
-        .build(&database_url).await.unwrap();
+        .build(&database_url)
+        .await
+        .unwrap();
 
     HttpServer::new(move || {
         // static ディレクトリを指定して, Teraを初期化
@@ -164,7 +188,10 @@ async fn main() -> io::Result<()> {
 
         App::new()
             // setup DB pool to be used with web::Data<Pool> extractor
-            .data(Context {  db_pool: pool.clone(), templates: templates.clone(), })
+            .data(Context {
+                db_pool: pool.clone(),
+                templates: templates.clone(),
+            })
             // cookie session middleware
             .wrap(CookieSession::signed(&[0; 32]).secure(false))
             // enable logger - always register actix-web Logger middleware last
@@ -178,11 +205,8 @@ async fn main() -> io::Result<()> {
             .service(welcome)
             // with path parameters
             .service(web::resource("/user/{name}").route(web::get().to(with_param)))
-
             // async response body
-            .service(
-                web::resource("/async-body/{name}").route(web::get().to(response_body)),
-            )
+            .service(web::resource("/async-body/{name}").route(web::get().to(response_body)))
             .service(
                 web::resource("/test").to(|req: HttpRequest| match *req.method() {
                     Method::GET => HttpResponse::Ok(),
