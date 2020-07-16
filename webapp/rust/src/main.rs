@@ -112,6 +112,18 @@ async fn get_message(data: web::Data<Context>) -> Result<HttpResponse> {
         .body(serde_json::to_string(&messages).unwrap()))
 }
 
+#[post("message")]
+async fn post_message(data: web::Data<Context>) -> Result<HttpResponse> {
+    let mut tx = data.db_pool.begin().await.unwrap();
+    println!("i'm on message POST");
+    sqlx::query("INSERT INTO message (channel_id, user_id, content, created_at) VALUES (100, 100, ?, NOW())")
+        .bind("あかさたな")
+        .execute(&mut tx)
+        .await.unwrap();
+    tx.commit().await.unwrap();
+    Ok(HttpResponse::new(StatusCode::NO_CONTENT))
+}
+
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
 struct Message {
     id: i64,
@@ -201,6 +213,7 @@ async fn main() -> io::Result<()> {
             .service(get_initialize)
             .service(get_index)
             .service(get_message)
+            .service(post_message)
             // register simple route, handle all methods
             .service(welcome)
             // with path parameters
