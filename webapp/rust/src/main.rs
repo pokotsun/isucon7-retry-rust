@@ -221,6 +221,23 @@ async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpRes
         .body(view))
 }
 
+#[get("register")]
+async fn get_register(data: web::Data<Context>) -> Result<HttpResponse> {
+    let templates = &data.templates;
+    let channels: Vec<ChannelInfo> = Vec::new();
+    let mut ctx = tera::Context::new();
+    ctx.insert("channel_id", &0);
+    ctx.insert("channels", &channels);
+    let view = templates
+        .render("register.html", &ctx)
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(view))
+}
+
+
 async fn not_found() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
 }
@@ -280,6 +297,7 @@ async fn main() -> io::Result<()> {
             .wrap(middleware::Logger::default())
             .service(get_initialize)
             .service(get_index)
+            .service(get_register)
             .service(get_message)
             .service(post_message)
             .service(get_add_channel)
