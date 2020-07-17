@@ -47,12 +47,15 @@ async fn get_user(pool: MySqlPool, user_id: u64) -> Result<User, sqlx::Error> {
 
 async fn add_message(channel_id: i64, user_id: i64, content: &str, pool: &MySqlPool) -> u64 {
     let mut tx = pool.begin().await.unwrap();
-    sqlx::query("INSERT INTO message (channel_id, user_id, content, created_at) VALUES (?, ?, ?, NOW())")
-        .bind(channel_id)
-        .bind(user_id)
-        .bind(content)
-        .execute(&mut tx)
-        .await.unwrap();
+    sqlx::query(
+        "INSERT INTO message (channel_id, user_id, content, created_at) VALUES (?, ?, ?, NOW())",
+    )
+    .bind(channel_id)
+    .bind(user_id)
+    .bind(content)
+    .execute(&mut tx)
+    .await
+    .unwrap();
     let rec: (u64,) = sqlx::query_as("SELECT LAST_INSERT_ID()")
         .fetch_one(&mut tx)
         .await
@@ -61,14 +64,21 @@ async fn add_message(channel_id: i64, user_id: i64, content: &str, pool: &MySqlP
     return rec.0;
 }
 
-async fn query_messages(data: web::Data<Context>, chan_id: i64, last_id: i64) -> Result<Vec<Message>, sqlx::Error> {
+async fn query_messages(
+    data: web::Data<Context>,
+    chan_id: i64,
+    last_id: i64,
+) -> Result<Vec<Message>, sqlx::Error> {
     let pool = &data.db_pool;
-    let msgs = sqlx::query_as::<_, Message>("SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100")
-                .bind(last_id)
-                .bind(chan_id)
-                .fetch_all(pool)
-                .await.unwrap();
-    return Ok(msgs)
+    let msgs = sqlx::query_as::<_, Message>(
+        "SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100",
+    )
+    .bind(last_id)
+    .bind(chan_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    return Ok(msgs);
 }
 
 /// favicon handler
@@ -143,7 +153,6 @@ async fn post_message(data: web::Data<Context>) -> Result<HttpResponse> {
     add_message(200, 200, "カキクケコ", &data.db_pool).await;
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
-
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
 struct Message {
