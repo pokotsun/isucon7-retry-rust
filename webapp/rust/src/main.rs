@@ -1,6 +1,5 @@
 #[macro_use]
 extern crate actix_web;
-extern crate chrono;
 extern crate sqlx;
 extern crate tera;
 
@@ -36,7 +35,7 @@ struct User {
     created_at: NaiveDateTime,
 }
 
-async fn get_user(pool: &MySqlPool, user_id: i64) -> Result<User, sqlx::Error> {
+async fn get_user(pool: &MySqlPool, user_id: i64) -> anyhow::Result<User> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM user WHERE id = ?")
         .bind(user_id)
         .fetch_one(pool)
@@ -68,7 +67,7 @@ async fn query_messages(
     data: web::Data<Context>,
     chan_id: i64,
     last_id: i64,
-) -> Result<Vec<Message>, sqlx::Error> {
+) -> anyhow::Result<Vec<Message>> {
     let pool = &data.db_pool;
     let msgs = sqlx::query_as::<_, Message>(
         "SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100",
@@ -112,7 +111,7 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
     let pool = &data.db_pool;
     let templates = &data.templates;
     let user = ensure_login(&data, session).await;
-    
+
     let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
         .fetch_all(pool)
         .await
@@ -124,7 +123,8 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
     ctx.insert("user", &user);
     let view = templates
         .render("add_channel.html", &ctx)
-        .map_err(|e| error::ErrorInternalServerError(e)).unwrap();
+        .map_err(|e| error::ErrorInternalServerError(e))
+        .unwrap();
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
