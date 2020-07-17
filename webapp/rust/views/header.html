@@ -19,10 +19,10 @@
 
       <div class="collapse navbar-collapse" id="navbarsExampleDefault">
         <ul class="nav navbar-nav ml-auto">
-		{% if channel_id > 0 %}
+		{% if channel_id %}
 		<li class="nav-item"><a href="/history/{{ channel_id }}" class="nav-link">チャットログ</a></li>
         {% endif %}
-		{% if user.id  > 0 %}
+		{% if user %}
           <li class="nav-item"><a href="/add_channel" class="nav-link">チャンネル追加</a></li>
 		  <li class="nav-item"><a href="/profile/{{ user.name }}" class="nav-link">{{ user.display_name }}</a></li>
           <li class="nav-item"><a href="/logout" class="nav-link">ログアウト</a></li>
