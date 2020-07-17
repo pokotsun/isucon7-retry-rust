@@ -39,12 +39,11 @@ async fn get_user(pool: &MySqlPool, user_id: i64) -> anyhow::Result<User> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM user WHERE id = ?")
         .bind(user_id)
         .fetch_one(pool)
-        .await
-        .unwrap();
+        .await?;
     return Ok(user);
 }
 
-async fn add_message(channel_id: i64, user_id: i64, content: &str, pool: &MySqlPool) -> u64 {
+async fn add_message(channel_id: i64, user_id: i64, content: &str, pool: &MySqlPool) -> anyhow::Result<u64> {
     let mut tx = pool.begin().await.unwrap();
     sqlx::query(
         "INSERT INTO message (channel_id, user_id, content, created_at) VALUES (?, ?, ?, NOW())",
@@ -53,14 +52,12 @@ async fn add_message(channel_id: i64, user_id: i64, content: &str, pool: &MySqlP
     .bind(user_id)
     .bind(content)
     .execute(&mut tx)
-    .await
-    .unwrap();
+    .await?;
     let rec: (u64,) = sqlx::query_as("SELECT LAST_INSERT_ID()")
         .fetch_one(&mut tx)
-        .await
-        .unwrap();
-    tx.commit().await.unwrap();
-    return rec.0;
+        .await?;
+    tx.commit().await?;
+    return Ok(rec.0);
 }
 
 async fn query_messages(
@@ -75,8 +72,7 @@ async fn query_messages(
     .bind(last_id)
     .bind(chan_id)
     .fetch_all(pool)
-    .await
-    .unwrap();
+    .await?;
     return Ok(msgs);
 }
 
@@ -89,12 +85,12 @@ fn sess_set_user_id(session: &Session, id: i64) {
     session.set("user_id", id).unwrap();
 }
 
-async fn ensure_login(data: &web::Data<Context>, session: Session) -> User {
+async fn ensure_login(data: &web::Data<Context>, session: Session) -> anyhow::Result<User> {
     let pool = &data.db_pool;
     sess_set_user_id(&session, 1);
     let user_id = sess_user_id(session);
-    let user = get_user(pool, user_id).await.unwrap();
-    return user;
+    let user = get_user(pool, user_id).await?;
+    return Ok(user);
 }
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
@@ -110,7 +106,7 @@ struct ChannelInfo {
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let pool = &data.db_pool;
     let templates = &data.templates;
-    let user = ensure_login(&data, session).await;
+    let user = ensure_login(&data, session).await.unwrap();
 
     let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
         .fetch_all(pool)
@@ -200,7 +196,7 @@ async fn get_message(data: web::Data<Context>) -> Result<HttpResponse> {
 #[post("message")]
 async fn post_message(data: web::Data<Context>) -> Result<HttpResponse> {
     // TODO モックデータを置き換える
-    add_message(200, 200, "カキクケコ", &data.db_pool).await;
+    add_message(200, 200, "カキクケコ", &data.db_pool).await.unwrap();
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
 
