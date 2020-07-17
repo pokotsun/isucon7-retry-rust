@@ -25,21 +25,21 @@ struct Context {
     templates: tera::Tera,
 }
 
-#[derive(sqlx::FromRow)]
+#[derive(sqlx::FromRow, Serialize, Deserialize)]
 struct User {
-    id: i64,
+    id: u64,
     name: String,
     salt: String,
     password: String,
     display_name: String,
-    avator_icon: String,
+    avatar_icon: String,
     created_at: NaiveDateTime,
 }
 
-async fn get_user(pool: MySqlPool, user_id: u64) -> Result<User, sqlx::Error> {
+async fn get_user(pool: &MySqlPool, user_id: i64) -> Result<User, sqlx::Error> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM user WHERE id = ?")
         .bind(user_id)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .unwrap();
     return Ok(user);
@@ -86,8 +86,49 @@ fn sess_user_id(session: Session) -> i64 {
     user_id
 }
 
-fn sess_set_user_id(session: Session, id: i64) {
+fn sess_set_user_id(session: &Session, id: i64) {
     session.set("user_id", id).unwrap();
+}
+
+async fn ensure_login(data: &web::Data<Context>, session: Session) -> User {
+    let pool = &data.db_pool;
+    sess_set_user_id(&session, 1);
+    let user_id = sess_user_id(session);
+    let user = get_user(pool, user_id).await.unwrap();
+    return user;
+}
+
+#[derive(sqlx::FromRow, Serialize, Deserialize)]
+struct ChannelInfo {
+    id: i64,
+    name: String,
+    description: String,
+    updated_at: NaiveDateTime,
+    created_at: NaiveDateTime,
+}
+
+#[get("add_channel")]
+async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
+    let pool = &data.db_pool;
+    let templates = &data.templates;
+    let user = ensure_login(&data, session).await;
+    
+    let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .unwrap();
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("channel_id", &0);
+    ctx.insert("channels", &channels);
+    ctx.insert("user", &user);
+    let view = templates
+        .render("add_channel.html.tera", &ctx)
+        .map_err(|e| error::ErrorInternalServerError(e)).unwrap();
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(view))
 }
 
 /// favicon handler
@@ -253,6 +294,7 @@ async fn main() -> io::Result<()> {
             .service(get_index)
             .service(get_message)
             .service(post_message)
+            .service(get_add_channel)
             // register simple route, handle all methods
             .service(welcome)
             // with path parameters
