@@ -86,6 +86,10 @@ fn sess_user_id(session: Session) -> i64 {
     user_id
 }
 
+fn sess_set_user_id(session: Session, id: i64) {
+    session.set("user_id", id).unwrap();
+}
+
 /// favicon handler
 #[get("/favicon")]
 async fn favicon() -> Result<fs::NamedFile> {
