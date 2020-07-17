@@ -127,12 +127,6 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
         .body(view))
 }
 
-/// favicon handler
-#[get("/favicon")]
-async fn favicon() -> Result<fs::NamedFile> {
-    Ok(fs::NamedFile::open("static/favicon.ico")?)
-}
-
 /// simple index handler
 #[get("/welcome")]
 async fn welcome(session: Session, req: HttpRequest) -> Result<HttpResponse> {
@@ -284,8 +278,6 @@ async fn main() -> io::Result<()> {
             .wrap(CookieSession::signed(&[0; 32]).secure(false))
             // enable logger - always register actix-web Logger middleware last
             .wrap(middleware::Logger::default())
-            // register favicon
-            .service(favicon)
             .service(get_initialize)
             .service(get_index)
             .service(get_message)
@@ -311,7 +303,7 @@ async fn main() -> io::Result<()> {
                 )
             }))
             // static files
-            .service(fs::Files::new("/static", "static").show_files_listing())
+            .service(fs::Files::new("", "../public").show_files_listing())
             // redirect
             .service(web::resource("/").route(web::get().to(|req: HttpRequest| {
                 println!("{:?}", req);
