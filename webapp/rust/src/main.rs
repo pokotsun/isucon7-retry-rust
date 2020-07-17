@@ -123,7 +123,7 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
     ctx.insert("channels", &channels);
     ctx.insert("user", &user);
     let view = templates
-        .render("add_channel.html.tera", &ctx)
+        .render("add_channel.html", &ctx)
         .map_err(|e| error::ErrorInternalServerError(e)).unwrap();
 
     Ok(HttpResponse::Ok()
@@ -223,7 +223,7 @@ async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpRes
     let mut ctx = tera::Context::new();
     ctx.insert("channel_id", &-1);
     let view = templates
-        .render("index.html.tera", &ctx)
+        .render("index.html", &ctx)
         .map_err(|e| error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok()
