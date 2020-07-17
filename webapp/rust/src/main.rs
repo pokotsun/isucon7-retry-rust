@@ -81,6 +81,11 @@ async fn query_messages(
     return Ok(msgs);
 }
 
+fn sess_user_id(session: Session) -> i64 {
+    let user_id = session.get::<i64>("user_id").unwrap().map_or(0, |v| v);
+    user_id
+}
+
 /// favicon handler
 #[get("/favicon")]
 async fn favicon() -> Result<fs::NamedFile> {
