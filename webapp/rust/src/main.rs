@@ -17,8 +17,7 @@ use bytes::Bytes;
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
-use sqlx::mysql::MySqlPool;
-use sqlx::mysql::MySqlQueryAs;
+use sqlx::mysql::{MySqlPool, MySqlQueryAs};
 use tera::Tera;
 
 struct Context {
@@ -114,14 +113,25 @@ async fn get_message(data: web::Data<Context>) -> Result<HttpResponse> {
 
 #[post("message")]
 async fn post_message(data: web::Data<Context>) -> Result<HttpResponse> {
-    let mut tx = data.db_pool.begin().await.unwrap();
-    println!("i'm on message POST");
-    sqlx::query("INSERT INTO message (channel_id, user_id, content, created_at) VALUES (100, 100, ?, NOW())")
-        .bind("あかさたな")
+    // TODO モックデータを置き換える
+    add_message(200, 200, "カキクケコ", &data.db_pool).await;
+    Ok(HttpResponse::new(StatusCode::NO_CONTENT))
+}
+
+async fn add_message(channel_id: i64, user_id: i64, content: &str, pool: &MySqlPool) -> u64 {
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("INSERT INTO message (channel_id, user_id, content, created_at) VALUES (?, ?, ?, NOW())")
+        .bind(channel_id)
+        .bind(user_id)
+        .bind(content)
         .execute(&mut tx)
         .await.unwrap();
     tx.commit().await.unwrap();
-    Ok(HttpResponse::new(StatusCode::NO_CONTENT))
+    let rec: (u64,) = sqlx::query_as("SELECT LAST_INSERT_ID()")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    return rec.0;
 }
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
