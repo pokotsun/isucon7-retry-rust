@@ -76,21 +76,26 @@ async fn query_messages(
     return Ok(msgs);
 }
 
-fn sess_user_id(session: Session) -> i64 {
-    let user_id = session.get::<i64>("user_id").unwrap().map_or(0, |v| v);
-    user_id
+fn sess_user_id(session: &Session) -> Option<i64> {
+    session.get::<i64>("user_id").map_or(None, |v| v)
 }
 
-fn sess_set_user_id(session: &Session, id: i64) {
-    session.set("user_id", id).unwrap();
+fn sess_set_user_id(session: &Session, id: i64) -> Result<()> {
+    session.set("user_id", id)?;
+    Ok(())
 }
 
-async fn ensure_login(data: &web::Data<Context>, session: Session) -> anyhow::Result<User> {
+async fn ensure_login(data: &web::Data<Context>, session: Session) -> Option<User> {
     let pool = &data.db_pool;
-    sess_set_user_id(&session, 1);
-    let user_id = sess_user_id(session);
-    let user = get_user(pool, user_id).await?;
-    return Ok(user);
+    // sess_set_user_id(&session, 1).expect("session access error"); // FIXME 一時的な値
+    let uid = sess_user_id(&session);
+    if let Some(id) = uid {
+        if let Ok(user) = get_user(pool, id).await {
+            return Some(user);
+        }
+        session.remove("user_id");
+    }
+    return None;
 }
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
@@ -106,12 +111,16 @@ struct ChannelInfo {
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let pool = &data.db_pool;
     let templates = &data.templates;
-    let user = ensure_login(&data, session).await.unwrap();
+
+    let user = ensure_login(&data, session).await;
+    if user.is_none() {
+        return Ok(redirect_to("/").await);
+    }
 
     let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
         .fetch_all(pool)
         .await
-        .unwrap();
+        .map_err(|e| error::ErrorInternalServerError(e))?;
 
     let mut ctx = tera::Context::new();
     ctx.insert("channel_id", &0);
