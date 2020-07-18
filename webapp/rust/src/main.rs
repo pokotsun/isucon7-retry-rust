@@ -119,8 +119,7 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
     ctx.insert("user", &user);
     let view = templates
         .render("add_channel.html", &ctx)
-        .map_err(|e| error::ErrorInternalServerError(e))
-        .unwrap();
+        .map_err(|e| error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -154,23 +153,23 @@ async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
     sqlx::query("DELETE FROM user WHERE id > 1000")
         .execute(pool)
         .await
-        .unwrap();
+        .map_err(|e| error::ErrorInternalServerError(e))?;
     sqlx::query("DELETE FROM image WHERE id > 1001")
         .execute(pool)
         .await
-        .unwrap();
+        .map_err(|e| error::ErrorInternalServerError(e))?;
     sqlx::query("DELETE FROM channel WHERE id > 10")
         .execute(pool)
         .await
-        .unwrap();
+        .map_err(|e| error::ErrorInternalServerError(e))?;
     sqlx::query("DELETE FROM message WHERE id > 10000")
         .execute(pool)
         .await
-        .unwrap();
+        .map_err(|e| error::ErrorInternalServerError(e))?;
     sqlx::query("DELETE FROM haveread")
         .execute(pool)
         .await
-        .unwrap();
+        .map_err(|e| error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
@@ -182,9 +181,10 @@ async fn get_message(data: web::Data<Context>) -> Result<HttpResponse> {
         .fetch_all(pool)
         .await
         .unwrap();
+    let json = serde_json::to_string(&messages).expect("can not convert to json from messages");
     Ok(HttpResponse::build(StatusCode::OK)
         .content_type("text/html; charset=utf-8")
-        .body(serde_json::to_string(&messages).unwrap()))
+        .body(json))
 }
 
 #[post("message")]
