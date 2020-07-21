@@ -242,6 +242,54 @@ async fn get_channel(
         .body(view))
 }
 
+#[get("register")]
+async fn get_register(data: web::Data<Context>) -> Result<HttpResponse> {
+    let templates = &data.templates;
+    let channels: Vec<ChannelInfo> = Vec::new();
+    let mut ctx = tera::Context::new();
+    ctx.insert("channel_id", &0);
+    ctx.insert("channels", &channels);
+    let view = templates
+        .render("register.html", &ctx)
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(view))
+}
+
+#[post("register")]
+async fn post_register(
+    session: Session,
+    data: web::Data<Context>,
+    form: web::Form<FormUser>,
+) -> Result<HttpResponse> {
+    let name = &form.name;
+    let pw = &form.password;
+    if name == "" || pw == "" {
+        return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
+    }
+    let pool = &data.db_pool;
+    // TODO Duplicated Id Errorの実装
+    let user_id = register(pool, &name, &pw)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+    sess_set_user_id(&session, user_id as i64)?;
+    Ok(redirect_to(&"/").await)
+}
+
+#[get("login")]
+async fn get_login(data: web::Data<Context>) -> Result<HttpResponse> {
+    let templates = &data.templates;
+    let view = templates
+        .render("login.html", &tera::Context::new())
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::Ok()
+       .content_type("text/html; charset=utf-8")
+       .body(view))
+}
+
 #[get("add_channel")]
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let pool = &data.db_pool;
@@ -410,21 +458,6 @@ struct Message {
     created_at: NaiveDateTime,
 }
 
-#[get("register")]
-async fn get_register(data: web::Data<Context>) -> Result<HttpResponse> {
-    let templates = &data.templates;
-    let channels: Vec<ChannelInfo> = Vec::new();
-    let mut ctx = tera::Context::new();
-    ctx.insert("channel_id", &0);
-    ctx.insert("channels", &channels);
-    let view = templates
-        .render("register.html", &ctx)
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(view))
-}
 
 #[derive(Deserialize)]
 struct FormUser {
@@ -432,26 +465,6 @@ struct FormUser {
     password: String,
 }
 
-#[post("register")]
-async fn post_register(
-    session: Session,
-    data: web::Data<Context>,
-    form: web::Form<FormUser>,
-) -> Result<HttpResponse> {
-    let name = &form.name;
-    let pw = &form.password;
-    println!("query: {}, {}", name, pw);
-    if name == "" || pw == "" {
-        return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
-    }
-    let pool = &data.db_pool;
-    // TODO Duplicated Id Errorの実装
-    let user_id = register(pool, &name, &pw)
-        .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-    sess_set_user_id(&session, user_id as i64)?;
-    Ok(redirect_to(&"/").await)
-}
 
 async fn not_found() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
@@ -505,6 +518,7 @@ async fn main() -> io::Result<()> {
             .service(get_index)
             .service(get_register)
             .service(post_register)
+            .service(get_login)
             .service(web::resource("/channel/{channel_id}").route(web::get().to(get_channel)))
             .service(get_message)
             .service(post_message)
