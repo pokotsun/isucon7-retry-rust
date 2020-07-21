@@ -184,7 +184,6 @@ async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpRes
     if let Some(_) = session.get::<i32>("user_id")? {
         return Ok(redirect_to(&"/channel/1").await);
     }
-    let mut ctx = tera::Context::new();
     let view = templates
         .render("index.html", &tera::Context::new())
         .map_err(|e| error::ErrorInternalServerError(e))?;
@@ -201,6 +200,46 @@ struct ChannelInfo {
     description: String,
     updated_at: NaiveDateTime,
     created_at: NaiveDateTime,
+}
+
+// /channel/:channel_id
+async fn get_channel(
+    session: Session,
+    data: web::Data<Context>,
+    path: web::Path<(i64,)>,
+) -> Result<HttpResponse> {
+    let user = ensure_login(&data, session).await;
+    if user.is_none() {
+        return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
+    }
+    let channel_id = path.0;
+    let pool = &data.db_pool;
+
+    let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    let desc = &channels
+        .iter()
+        .find(|x| x.id == channel_id)
+        .unwrap()
+        .description;
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("channel_id", &0);
+    ctx.insert("channels", &channels);
+    ctx.insert("user", &user);
+    ctx.insert("description", &desc);
+
+    let templates = &data.templates;
+    let view = templates
+        .render("channel.html", &ctx)
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(view))
 }
 
 #[get("add_channel")]
@@ -273,7 +312,6 @@ async fn post_add_channel(
     tx.commit().await.unwrap();
     Ok(redirect_to(&format!("/channel/{}", last_id)).await)
 }
-
 
 #[derive(Deserialize)]
 struct QueryMessage {
@@ -372,7 +410,6 @@ struct Message {
     created_at: NaiveDateTime,
 }
 
-
 #[get("register")]
 async fn get_register(data: web::Data<Context>) -> Result<HttpResponse> {
     let templates = &data.templates;
@@ -436,15 +473,6 @@ async fn response_body(path: web::Path<String>) -> HttpResponse {
     HttpResponse::Ok().streaming(rx_body)
 }
 
-/// handler with path parameters like `/user/{name}/`
-async fn with_param(req: HttpRequest, path: web::Path<(String,)>) -> HttpResponse {
-    println!("{:?}", req);
-
-    HttpResponse::Ok()
-        .content_type("text/plain")
-        .body(format!("Hello {}!", path.0))
-}
-
 #[actix_rt::main]
 async fn main() -> io::Result<()> {
     env::set_var("RUST_LOG", "actix_web=debug,actix_server=info");
@@ -477,12 +505,11 @@ async fn main() -> io::Result<()> {
             .service(get_index)
             .service(get_register)
             .service(post_register)
+            .service(web::resource("/channel/{channel_id}").route(web::get().to(get_channel)))
             .service(get_message)
             .service(post_message)
             .service(get_add_channel)
             .service(post_add_channel)
-            // with path parameters
-            .service(web::resource("/user/{name}").route(web::get().to(with_param)))
             // async response body
             .service(web::resource("/async-body/{name}").route(web::get().to(response_body)))
             .service(
