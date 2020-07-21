@@ -43,7 +43,12 @@ async fn get_user(pool: &MySqlPool, user_id: i64) -> anyhow::Result<User> {
     return Ok(user);
 }
 
-async fn add_message(channel_id: i64, user_id: i64, content: &str, pool: &MySqlPool) -> anyhow::Result<u64> {
+async fn add_message(
+    channel_id: i64,
+    user_id: i64,
+    content: &str,
+    pool: &MySqlPool,
+) -> anyhow::Result<u64> {
     let mut tx = pool.begin().await.unwrap();
     sqlx::query(
         "INSERT INTO message (channel_id, user_id, content, created_at) VALUES (?, ?, ?, NOW())",
@@ -113,9 +118,9 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
     let templates = &data.templates;
 
     let user = ensure_login(&data, session).await;
-    if user.is_none() {
-        return Ok(redirect_to("/").await);
-    }
+    // if user.is_none() {
+    //     return Ok(redirect_to("/").await);
+    // }
 
     let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
         .fetch_all(pool)
@@ -133,6 +138,49 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(view))
+}
+
+#[derive(Deserialize)]
+struct FormChannel {
+    name: String,
+    description: String,
+}
+
+#[post("add_channel")]
+async fn post_add_channel(
+    data: web::Data<Context>,
+    session: Session,
+    form: web::Form<FormChannel>,
+) -> Result<HttpResponse> {
+    let pool = &data.db_pool;
+
+    let user = ensure_login(&data, session).await;
+    if user.is_none() {
+        return Ok(redirect_to("/").await);
+    }
+
+    let name = &form.name;
+    let desc = &form.description;
+
+    if name.is_empty() || desc.is_empty() {
+        return Ok(HttpResponse::BadRequest().finish());
+    }
+
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query(
+        "INSERT INTO channel (name, description, updated_at, created_at) VALUES (?, ?, NOW(), NOW())"
+    )
+    .bind(name)
+    .bind(desc)
+    .execute(&mut tx)
+    .await.map_err(|e| error::ErrorInternalServerError(e))?;
+    let ret: (u64,) = sqlx::query_as("SELECT LAST_INSERT_ID()")
+        .fetch_one(&mut tx)
+        .await
+        .unwrap();
+    let last_id = ret.0;
+    tx.commit().await.unwrap();
+    Ok(redirect_to(&format!("/channel/{}", last_id)).await)
 }
 
 /// simple index handler
@@ -199,7 +247,9 @@ async fn get_message(data: web::Data<Context>) -> Result<HttpResponse> {
 #[post("message")]
 async fn post_message(data: web::Data<Context>) -> Result<HttpResponse> {
     // TODO モックデータを置き換える
-    add_message(200, 200, "カキクケコ", &data.db_pool).await.unwrap();
+    add_message(200, 200, "カキクケコ", &data.db_pool)
+        .await
+        .unwrap();
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
 
@@ -245,7 +295,6 @@ async fn get_register(data: web::Data<Context>) -> Result<HttpResponse> {
         .content_type("text/html; charset=utf-8")
         .body(view))
 }
-
 
 async fn not_found() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
@@ -310,6 +359,7 @@ async fn main() -> io::Result<()> {
             .service(get_message)
             .service(post_message)
             .service(get_add_channel)
+            .service(post_add_channel)
             // register simple route, handle all methods
             .service(welcome)
             // with path parameters
