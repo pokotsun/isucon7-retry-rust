@@ -229,27 +229,6 @@ async fn post_add_channel(
     Ok(redirect_to(&format!("/channel/{}", last_id)).await)
 }
 
-/// simple index handler
-#[get("/welcome")]
-async fn welcome(session: Session, req: HttpRequest) -> Result<HttpResponse> {
-    println!("{:?}", req);
-
-    // session
-    let mut counter = 1;
-    if let Some(count) = session.get::<i32>("counter")? {
-        println!("SESSION value: {}", count);
-        counter = count + 1;
-    }
-
-    // set counter to session
-    session.set("counter", counter)?;
-
-    // response
-    Ok(HttpResponse::build(StatusCode::OK)
-        .content_type("text/html; charset=utf-8")
-        .body(include_str!("../static/welcome.html")))
-}
-
 #[get("initialize")]
 async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
     let pool = &data.db_pool;
@@ -278,7 +257,7 @@ async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
 }
 
 #[derive(Deserialize)]
-struct GetMessage {
+struct QueryMessage {
     channel_id: i64,
     last_id: i64,
 }
@@ -311,7 +290,7 @@ async fn jsonify_message(pool: &MySqlPool, m: &Message) -> ServiceMessage {
 async fn get_message(
     session: Session,
     data: web::Data<Context>,
-    query: web::Query<GetMessage>,
+    query: web::Query<QueryMessage>,
 ) -> Result<HttpResponse> {
     let user_id = sess_user_id(&session);
     if user_id.is_none() {
@@ -500,8 +479,6 @@ async fn main() -> io::Result<()> {
             .service(post_message)
             .service(get_add_channel)
             .service(post_add_channel)
-            // register simple route, handle all methods
-            .service(welcome)
             // with path parameters
             .service(web::resource("/user/{name}").route(web::get().to(with_param)))
             // async response body
