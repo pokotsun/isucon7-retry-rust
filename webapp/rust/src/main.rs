@@ -28,6 +28,15 @@ struct Context {
     db_pool: MySqlPool,
     templates: tera::Tera,
 }
+fn render(templates: &tera::Tera, ctx: Option<tera::Context>, name: &str) -> Result<HttpResponse> {
+    let ctx = ctx.map_or(tera::Context::new(), |v| v);
+    let view = templates
+        .render(name, &ctx)
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(view))
+}
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
 struct User {
@@ -184,13 +193,8 @@ async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpRes
     if let Some(_) = session.get::<i32>("user_id")? {
         return Ok(redirect_to(&"/channel/1").await);
     }
-    let view = templates
-        .render("index.html", &tera::Context::new())
-        .map_err(|e| error::ErrorInternalServerError(e))?;
 
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(view))
+    render(templates, None, "index.html")
 }
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
@@ -232,30 +236,17 @@ async fn get_channel(
     ctx.insert("user", &user);
     ctx.insert("description", &desc);
 
-    let templates = &data.templates;
-    let view = templates
-        .render("channel.html", &ctx)
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(view))
+    render(&data.templates, Some(ctx), "channel.html")
 }
 
 #[get("register")]
 async fn get_register(data: web::Data<Context>) -> Result<HttpResponse> {
-    let templates = &data.templates;
     let channels: Vec<ChannelInfo> = Vec::new();
     let mut ctx = tera::Context::new();
     ctx.insert("channel_id", &0);
     ctx.insert("channels", &channels);
-    let view = templates
-        .render("register.html", &ctx)
-        .map_err(|e| error::ErrorInternalServerError(e))?;
 
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(view))
+    render(&data.templates, Some(ctx), "register.html")
 }
 
 #[post("register")]
@@ -286,14 +277,13 @@ async fn get_login(data: web::Data<Context>) -> Result<HttpResponse> {
         .map_err(|e| error::ErrorInternalServerError(e))?;
 
     Ok(HttpResponse::Ok()
-       .content_type("text/html; charset=utf-8")
-       .body(view))
+        .content_type("text/html; charset=utf-8")
+        .body(view))
 }
 
 #[get("add_channel")]
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let pool = &data.db_pool;
-    let templates = &data.templates;
 
     let user = ensure_login(&data, session).await;
     if user.is_none() {
@@ -309,13 +299,8 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
     ctx.insert("channel_id", &0);
     ctx.insert("channels", &channels);
     ctx.insert("user", &user);
-    let view = templates
-        .render("add_channel.html", &ctx)
-        .map_err(|e| error::ErrorInternalServerError(e))?;
 
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(view))
+    render(&data.templates, Some(ctx), "add_channel.html")
 }
 
 #[derive(Deserialize)]
@@ -458,13 +443,11 @@ struct Message {
     created_at: NaiveDateTime,
 }
 
-
 #[derive(Deserialize)]
 struct FormUser {
     name: String,
     password: String,
 }
-
 
 async fn not_found() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
