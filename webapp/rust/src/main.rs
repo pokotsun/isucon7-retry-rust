@@ -96,7 +96,6 @@ fn sess_set_user_id(session: &Session, id: i64) -> Result<()> {
 
 async fn ensure_login(data: &web::Data<Context>, session: Session) -> Option<User> {
     let pool = &data.db_pool;
-    // sess_set_user_id(&session, 1).expect("session access error"); // FIXME 一時的な値
     let uid = sess_user_id(&session);
     if let Some(id) = uid {
         if let Ok(user) = get_user(pool, id).await {
@@ -147,6 +146,52 @@ async fn register(pool: &MySqlPool, name: &str, password: &str) -> anyhow::Resul
     let last_id = ret.0;
     tx.commit().await?;
     Ok(last_id)
+}
+
+// request handlers
+
+#[get("initialize")]
+async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
+    let pool = &data.db_pool;
+    sqlx::query("DELETE FROM user WHERE id > 1000")
+        .execute(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+    sqlx::query("DELETE FROM image WHERE id > 1001")
+        .execute(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+    sqlx::query("DELETE FROM channel WHERE id > 10")
+        .execute(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+    sqlx::query("DELETE FROM message WHERE id > 10000")
+        .execute(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+    sqlx::query("DELETE FROM haveread")
+        .execute(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::new(StatusCode::NO_CONTENT))
+}
+
+#[get("/")]
+async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
+    let templates = &data.templates;
+
+    if let Some(_) = session.get::<i32>("user_id")? {
+        return Ok(redirect_to(&"/channel/1").await);
+    }
+    let mut ctx = tera::Context::new();
+    let view = templates
+        .render("index.html", &tera::Context::new())
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(view))
 }
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
@@ -229,32 +274,6 @@ async fn post_add_channel(
     Ok(redirect_to(&format!("/channel/{}", last_id)).await)
 }
 
-#[get("initialize")]
-async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
-    let pool = &data.db_pool;
-    sqlx::query("DELETE FROM user WHERE id > 1000")
-        .execute(pool)
-        .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-    sqlx::query("DELETE FROM image WHERE id > 1001")
-        .execute(pool)
-        .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-    sqlx::query("DELETE FROM channel WHERE id > 10")
-        .execute(pool)
-        .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-    sqlx::query("DELETE FROM message WHERE id > 10000")
-        .execute(pool)
-        .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-    sqlx::query("DELETE FROM haveread")
-        .execute(pool)
-        .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-
-    Ok(HttpResponse::new(StatusCode::NO_CONTENT))
-}
 
 #[derive(Deserialize)]
 struct QueryMessage {
@@ -353,23 +372,6 @@ struct Message {
     created_at: NaiveDateTime,
 }
 
-#[get("index")]
-async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
-    let templates = &data.templates;
-
-    if let Some(_) = session.get::<i32>("user_id")? {
-        return Ok(redirect_to(&"/channel/1").await);
-    }
-    let mut ctx = tera::Context::new();
-    ctx.insert("channel_id", &-1);
-    let view = templates
-        .render("index.html", &ctx)
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(view))
-}
 
 #[get("register")]
 async fn get_register(data: web::Data<Context>) -> Result<HttpResponse> {
@@ -498,11 +500,6 @@ async fn main() -> io::Result<()> {
             }))
             // static files
             .service(fs::Files::new("", "../public").show_files_listing())
-            // redirect
-            .service(web::resource("/").route(web::get().to(|req: HttpRequest| {
-                println!("{:?}", req);
-                return redirect_to("static/welcome.html");
-            })))
             // default
             .default_service(
                 // 404 for GET request

@@ -1,15 +1,7 @@
-<!DOCTYPE html>
-<html>
-
-<head>
-  <title>actix - basics</title>
-  <link rel="shortcut icon" type="image/x-icon" href="/favicon" />
-</head>
-
-<body>
-  <h2>channel_id: {{ channel_id }}</h2>
-  <h1>Welcome <img width="30px" height="30px" src="/static/actixLogo.png" /></h1>
-</body>
-
-</html>
+{% include "header.html" %}
+<h1>ようこそ Isubata へ。</h1>
+<p>Isubata は世界最速のチャットアプリケーションです。</p>
+<p>利用を開始するには<a href="/login">ログイン</a>してください。</p>
+<p>アカウントをお持ちでない場合は<a href="/register">新規登録</a>してください。</p>
+{% include "footer.html" %}
 
