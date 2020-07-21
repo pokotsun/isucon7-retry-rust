@@ -107,13 +107,13 @@ async fn ensure_login(data: &web::Data<Context>, session: Session) -> Option<Use
     return None;
 }
 
-const LettersAndDigits: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const LETTERS_AND_DIGITS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 fn random_string(size: usize) -> String {
     let mut rng = &mut rand::thread_rng();
 
     String::from_utf8(
-        LettersAndDigits
+        LETTERS_AND_DIGITS
             .as_bytes()
             .choose_multiple(&mut rng, size)
             .cloned()
@@ -122,7 +122,7 @@ fn random_string(size: usize) -> String {
     .unwrap()
 }
 
-async fn register(pool: &MySqlPool, name: String, password: String) -> anyhow::Result<u64> {
+async fn register(pool: &MySqlPool, name: &str, password: &str) -> anyhow::Result<u64> {
     let salt = random_string(20 as usize);
     let mut hasher = Sha1::new();
     hasher.input_str(&(salt.clone() + &password));
@@ -132,7 +132,7 @@ async fn register(pool: &MySqlPool, name: String, password: String) -> anyhow::R
     sqlx::query(
         &("INSERT INTO user (name, salt, password, display_name, avatar_icon, created_at)"
             .to_owned()
-            + "VALUES (?, ?, ?, ?, ?. NOW())"),
+            + "VALUES (?, ?, ?, ?, ?, NOW())"),
     )
     .bind(&name)
     .bind(salt)
@@ -143,8 +143,7 @@ async fn register(pool: &MySqlPool, name: String, password: String) -> anyhow::R
     .await?;
     let ret: (u64,) = sqlx::query_as("SELECT LAST_INSERT_ID()")
         .fetch_one(&mut tx)
-        .await
-        .unwrap();
+        .await?;
     let last_id = ret.0;
     tx.commit().await?;
     Ok(last_id)
@@ -165,9 +164,9 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
     let templates = &data.templates;
 
     let user = ensure_login(&data, session).await;
-    // if user.is_none() {
-    //     return Ok(redirect_to("/").await);
-    // }
+    if user.is_none() {
+        return Ok(redirect_to("/").await);
+    }
 
     let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
         .fetch_all(pool)
@@ -409,15 +408,32 @@ async fn get_register(data: web::Data<Context>) -> Result<HttpResponse> {
         .body(view))
 }
 
-struct PostRegister {
+#[derive(Deserialize)]
+struct FormUser {
     name: String,
-    pw: String,
+    password: String,
 }
 
-// #[post("register")]
-// async fn post_register() -> Result<HttpResponse> {
-//     Ok(HttpResponse::build())
-// }
+#[post("register")]
+async fn post_register(
+    session: Session,
+    data: web::Data<Context>,
+    form: web::Form<FormUser>,
+) -> Result<HttpResponse> {
+    let name = &form.name;
+    let pw = &form.password;
+    println!("query: {}, {}", name, pw);
+    if name == "" || pw == "" {
+        return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
+    }
+    let pool = &data.db_pool;
+    // TODO Duplicated Id Errorの実装
+    let user_id = register(pool, &name, &pw)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+    sess_set_user_id(&session, user_id as i64)?;
+    Ok(redirect_to(&"/").await)
+}
 
 async fn not_found() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
@@ -479,7 +495,7 @@ async fn main() -> io::Result<()> {
             .service(get_initialize)
             .service(get_index)
             .service(get_register)
-            // .service(post_register)
+            .service(post_register)
             .service(get_message)
             .service(post_message)
             .service(get_add_channel)
