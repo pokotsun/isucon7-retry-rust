@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate actix_web;
+extern crate rand;
 extern crate sqlx;
 extern crate tera;
 
@@ -18,6 +19,10 @@ use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::{MySqlPool, MySqlQueryAs};
 use tera::Tera;
+
+use crypto::digest::Digest;
+use crypto::sha1::Sha1;
+use rand::seq::SliceRandom;
 
 struct Context {
     db_pool: MySqlPool,
@@ -100,6 +105,49 @@ async fn ensure_login(data: &web::Data<Context>, session: Session) -> Option<Use
         session.remove("user_id");
     }
     return None;
+}
+
+const LettersAndDigits: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+fn random_string(size: usize) -> String {
+    let mut rng = &mut rand::thread_rng();
+
+    String::from_utf8(
+        LettersAndDigits
+            .as_bytes()
+            .choose_multiple(&mut rng, size)
+            .cloned()
+            .collect(),
+    )
+    .unwrap()
+}
+
+async fn register(pool: &MySqlPool, name: String, password: String) -> anyhow::Result<u64> {
+    let salt = random_string(20 as usize);
+    let mut hasher = Sha1::new();
+    hasher.input_str(&(salt.clone() + &password));
+    let hex = hasher.result_str();
+
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query(
+        &("INSERT INTO user (name, salt, password, display_name, avatar_icon, created_at)"
+            .to_owned()
+            + "VALUES (?, ?, ?, ?, ?. NOW())"),
+    )
+    .bind(&name)
+    .bind(salt)
+    .bind(hex)
+    .bind(&name)
+    .bind("default.png")
+    .execute(&mut tx)
+    .await?;
+    let ret: (u64,) = sqlx::query_as("SELECT LAST_INSERT_ID()")
+        .fetch_one(&mut tx)
+        .await
+        .unwrap();
+    let last_id = ret.0;
+    tx.commit().await?;
+    Ok(last_id)
 }
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
@@ -361,6 +409,16 @@ async fn get_register(data: web::Data<Context>) -> Result<HttpResponse> {
         .body(view))
 }
 
+struct PostRegister {
+    name: String,
+    pw: String,
+}
+
+// #[post("register")]
+// async fn post_register() -> Result<HttpResponse> {
+//     Ok(HttpResponse::build())
+// }
+
 async fn not_found() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
 }
@@ -421,6 +479,7 @@ async fn main() -> io::Result<()> {
             .service(get_initialize)
             .service(get_index)
             .service(get_register)
+            // .service(post_register)
             .service(get_message)
             .service(post_message)
             .service(get_add_channel)
