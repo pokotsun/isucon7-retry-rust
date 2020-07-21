@@ -66,11 +66,10 @@ async fn add_message(
 }
 
 async fn query_messages(
-    data: web::Data<Context>,
+    pool: &MySqlPool,
     chan_id: i64,
     last_id: i64,
 ) -> anyhow::Result<Vec<Message>> {
-    let pool = &data.db_pool;
     let msgs = sqlx::query_as::<_, Message>(
         "SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100",
     )
@@ -231,14 +230,80 @@ async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
 
+#[derive(Deserialize)]
+struct GetMessage {
+    channel_id: i64,
+    last_id: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ServiceMessage {
+    id: i64,
+    user: User,
+    date: NaiveDateTime,
+    content: String,
+}
+
+async fn jsonify_message(pool: &MySqlPool, m: &Message) -> ServiceMessage {
+    let user =
+        sqlx::query_as::<_, User>("SELECT name, display_name, avatar_icon FROM user WHERE id = ?")
+            .bind(m.user_id)
+            .fetch_one(pool)
+            .await
+            .expect("can't get user for service message");
+    // TODO 時刻のフォーマットをする
+    ServiceMessage {
+        id: m.id,
+        user: user,
+        date: m.created_at,
+        content: m.content.to_string(),
+    }
+}
+
 #[get("message")]
-async fn get_message(data: web::Data<Context>) -> Result<HttpResponse> {
+async fn get_message(
+    session: Session,
+    data: web::Data<Context>,
+    query: web::Query<GetMessage>,
+) -> Result<HttpResponse> {
+    let user_id = sess_user_id(&session);
+    if user_id.is_none() {
+        return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
+    }
+
     let pool = &data.db_pool;
-    let messages = sqlx::query_as::<_, Message>("SELECT * From message ORDER BY id DESC LIMIT 100")
-        .fetch_all(pool)
+    let channel_id = query.channel_id;
+    let last_id = query.last_id;
+
+    let messages = query_messages(pool, channel_id, last_id)
         .await
-        .unwrap();
-    let json = serde_json::to_string(&messages).expect("can not convert to json from messages");
+        .expect("can't get messages");
+
+    let num_messages = messages.len();
+    let mut response: Vec<ServiceMessage> = Vec::new();
+    for i in 0..num_messages {
+        let message = &messages[i];
+        let smessage = jsonify_message(pool, message).await;
+        response.push(smessage);
+    }
+
+    if num_messages > 0 {
+        let last_inserted_id = messages[0].id;
+        sqlx::query(
+            &("INSERT INTO haveread (user_id, channel_id, message_id, updated_at, created_at)"
+                .to_owned()
+                + " VALUES (?, ?, ?, NOW(), NOW())"
+                + "ON DUPLICATE KEY UPDATE message_id = ?, updated_at = NOW()"),
+        )
+        .bind(user_id)
+        .bind(channel_id)
+        .bind(last_inserted_id)
+        .bind(last_inserted_id)
+        .execute(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+    }
+    let json = serde_json::to_string(&response).expect("can not convert to json from messages");
     Ok(HttpResponse::build(StatusCode::OK)
         .content_type("text/html; charset=utf-8")
         .body(json))
