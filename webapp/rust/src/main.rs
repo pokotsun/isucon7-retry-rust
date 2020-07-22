@@ -417,6 +417,16 @@ async fn get_message(
         .body(json))
 }
 
+async fn query_channels(pool: &MySqlPool) -> anyhow::Result<Vec<i64>> {
+    let res: Vec<i64> = sqlx::query_as::<_, (i64,)>("SELECT id FROM channel")
+        .fetch_all(pool)
+        .await?
+        .iter()
+        .map(|x| x.0)
+        .collect();
+    Ok(res)
+}
+
 #[get("add_channel")]
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let pool = &data.db_pool;
