@@ -249,6 +249,12 @@ async fn get_register(data: web::Data<Context>) -> Result<HttpResponse> {
     render(&data.templates, Some(ctx), "register.html")
 }
 
+#[derive(Deserialize)]
+struct FormUser {
+    name: String,
+    password: String,
+}
+
 #[post("register")]
 async fn post_register(
     session: Session,
@@ -279,6 +285,34 @@ async fn get_login(data: web::Data<Context>) -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(view))
+}
+
+#[post("login")]
+async fn post_login(
+    session: Session,
+    data: web::Data<Context>,
+    form: web::Form<FormUser>,
+) -> Result<HttpResponse> {
+    let name = &form.name;
+    let pw = &form.password;
+    if name == "" || pw == "" {
+        return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
+    }
+    let pool = &data.db_pool;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM user WHERE name = ?")
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    let mut hasher = Sha1::new();
+    hasher.input_str(&(user.salt.clone() + pw));
+    let hex = hasher.result_str();
+    if hex != user.password {
+        return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+    }
+    sess_set_user_id(&session, user.id as i64)?;
+    Ok(redirect_to(&"/").await)
 }
 
 #[get("add_channel")]
@@ -442,12 +476,6 @@ struct Message {
     created_at: NaiveDateTime,
 }
 
-#[derive(Deserialize)]
-struct FormUser {
-    name: String,
-    password: String,
-}
-
 async fn not_found() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
 }
@@ -501,6 +529,7 @@ async fn main() -> io::Result<()> {
             .service(get_register)
             .service(post_register)
             .service(get_login)
+            .service(post_login)
             .service(web::resource("/channel/{channel_id}").route(web::get().to(get_channel)))
             .service(get_message)
             .service(post_message)
