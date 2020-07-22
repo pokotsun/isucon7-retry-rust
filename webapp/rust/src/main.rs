@@ -321,6 +321,34 @@ async fn get_logout(session: Session) -> Result<HttpResponse> {
     Ok(redirect_to(&"/").await)
 }
 
+#[derive(Deserialize)]
+struct FormMessage {
+    message: String,
+    channel_id: i64,
+}
+
+#[post("message")]
+async fn post_message(session: Session, data: web::Data<Context>, form: web::Form<FormMessage>) -> Result<HttpResponse> {
+    let user = ensure_login(&data, session).await;
+    if user.is_none() {
+        return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
+    }
+    let user = user.unwrap();
+
+    let message = &form.message;
+    if message == "" {
+        return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+    }
+
+    let channel_id = form.channel_id;
+
+    add_message(channel_id, user.id as i64, message, &data.db_pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::new(StatusCode::NO_CONTENT))
+}
+
 #[get("add_channel")]
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let pool = &data.db_pool;
@@ -389,7 +417,7 @@ async fn post_add_channel(
 #[derive(Deserialize)]
 struct QueryMessage {
     channel_id: i64,
-    last_id: i64,
+    last_message_id: i64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -402,7 +430,7 @@ struct ServiceMessage {
 
 async fn jsonify_message(pool: &MySqlPool, m: &Message) -> ServiceMessage {
     let user =
-        sqlx::query_as::<_, User>("SELECT name, display_name, avatar_icon FROM user WHERE id = ?")
+        sqlx::query_as::<_, User>("SELECT * FROM user WHERE id = ?")
             .bind(m.user_id)
             .fetch_one(pool)
             .await
@@ -428,7 +456,7 @@ async fn get_message(
 
     let pool = &data.db_pool;
     let channel_id = query.channel_id;
-    let last_id = query.last_id;
+    let last_id = query.last_message_id;
 
     let messages = query_messages(pool, channel_id, last_id)
         .await
@@ -464,14 +492,6 @@ async fn get_message(
         .body(json))
 }
 
-#[post("message")]
-async fn post_message(data: web::Data<Context>) -> Result<HttpResponse> {
-    // TODO モックデータを置き換える
-    add_message(200, 200, "カキクケコ", &data.db_pool)
-        .await
-        .unwrap();
-    Ok(HttpResponse::new(StatusCode::NO_CONTENT))
-}
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
 struct Message {
