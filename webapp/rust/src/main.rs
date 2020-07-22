@@ -356,7 +356,7 @@ struct QueryMessage {
 struct ServiceMessage {
     id: i64,
     user: User,
-    date: NaiveDateTime,
+    date: String,
     content: String,
 }
 
@@ -367,11 +367,10 @@ async fn jsonify_message(pool: &MySqlPool, m: &Message) -> ServiceMessage {
             .fetch_one(pool)
             .await
             .expect("can't get user for service message");
-    // TODO 時刻のフォーマットをする
     ServiceMessage {
         id: m.id,
         user: user,
-        date: m.created_at,
+        date: m.created_at.format("%Y/%m/%d %T").to_string(),
         content: m.content.to_string(),
     }
 }
