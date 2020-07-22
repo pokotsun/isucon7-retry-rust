@@ -315,6 +315,12 @@ async fn post_login(
     Ok(redirect_to(&"/").await)
 }
 
+#[get("logout")]
+async fn get_logout(session: Session) -> Result<HttpResponse> {
+    session.remove("user_id");
+    Ok(redirect_to(&"/").await)
+}
+
 #[get("add_channel")]
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let pool = &data.db_pool;
@@ -530,6 +536,7 @@ async fn main() -> io::Result<()> {
             .service(post_register)
             .service(get_login)
             .service(post_login)
+            .service(get_logout)
             .service(web::resource("/channel/{channel_id}").route(web::get().to(get_channel)))
             .service(get_message)
             .service(post_message)
