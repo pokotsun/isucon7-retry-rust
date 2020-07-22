@@ -84,7 +84,6 @@ async fn query_messages(
     chan_id: i64,
     last_id: i64,
 ) -> anyhow::Result<Vec<Message>> {
-
     println!("chan_id: {}, last_id: {}", chan_id, last_id);
     let msgs = sqlx::query_as::<_, Message>(
         "SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100",
@@ -330,7 +329,11 @@ struct FormMessage {
 }
 
 #[post("message")]
-async fn post_message(session: Session, data: web::Data<Context>, form: web::Form<FormMessage>) -> Result<HttpResponse> {
+async fn post_message(
+    session: Session,
+    data: web::Data<Context>,
+    form: web::Form<FormMessage>,
+) -> Result<HttpResponse> {
     let user = ensure_login(&data, session).await;
     if user.is_none() {
         return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
@@ -352,12 +355,11 @@ async fn post_message(session: Session, data: web::Data<Context>, form: web::For
 }
 
 async fn jsonify_message(pool: &MySqlPool, m: &Message) -> ServiceMessage {
-    let user =
-        sqlx::query_as::<_, User>("SELECT * FROM user WHERE id = ?")
-            .bind(m.user_id)
-            .fetch_one(pool)
-            .await
-            .expect("can't get user for service message");
+    let user = sqlx::query_as::<_, User>("SELECT * FROM user WHERE id = ?")
+        .bind(m.user_id)
+        .fetch_one(pool)
+        .await
+        .expect("can't get user for service message");
     ServiceMessage {
         id: m.id,
         user: user,
@@ -414,7 +416,6 @@ async fn get_message(
         .content_type("text/html; charset=utf-8")
         .body(json))
 }
-
 
 #[get("add_channel")]
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
@@ -494,7 +495,6 @@ struct ServiceMessage {
     date: String,
     content: String,
 }
-
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
 struct Message {
