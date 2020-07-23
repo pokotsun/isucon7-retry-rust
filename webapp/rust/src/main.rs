@@ -8,12 +8,10 @@ use std::{env, io, thread, time};
 
 use actix_files as fs;
 use actix_session::{CookieSession, Session};
-use actix_utils::mpsc;
 use actix_web::http::{header, Method, StatusCode};
 use actix_web::{
-    error, guard, middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer, Result,
+    error, guard, middleware, web, App, HttpRequest, HttpResponse, HttpServer, Result,
 };
-use bytes::Bytes;
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -192,7 +190,7 @@ async fn get_index(data: web::Data<Context>, session: Session) -> Result<HttpRes
     let templates = &data.templates;
 
     if let Some(_) = session.get::<i32>("user_id")? {
-        return Ok(redirect_to(&"/channel/1").await);
+        return Ok(redirect_to("/channel/1"));
     }
 
     render(templates, None, "index.html")
@@ -273,7 +271,7 @@ async fn post_register(
         .await
         .map_err(|e| error::ErrorInternalServerError(e))?;
     sess_set_user_id(&session, user_id as i64)?;
-    Ok(redirect_to(&"/").await)
+    Ok(redirect_to("/"))
 }
 
 #[get("login")]
@@ -313,13 +311,13 @@ async fn post_login(
         return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
     }
     sess_set_user_id(&session, user.id as i64)?;
-    Ok(redirect_to(&"/").await)
+    Ok(redirect_to("/"))
 }
 
 #[get("logout")]
 async fn get_logout(session: Session) -> Result<HttpResponse> {
     session.remove("user_id");
-    Ok(redirect_to(&"/").await)
+    Ok(redirect_to("/"))
 }
 
 #[derive(Deserialize)]
@@ -507,7 +505,7 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
 
     let user = ensure_login(&data, session).await;
     if user.is_none() {
-        return Ok(redirect_to("/").await);
+        return Ok(redirect_to("/"));
     }
 
     let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
@@ -539,7 +537,7 @@ async fn post_add_channel(
 
     let user = ensure_login(&data, session).await;
     if user.is_none() {
-        return Ok(redirect_to("/").await);
+        return Ok(redirect_to("/"));
     }
 
     let name = &form.name;
@@ -563,7 +561,7 @@ async fn post_add_channel(
         .unwrap();
     let last_id = ret.0;
     tx.commit().await.unwrap();
-    Ok(redirect_to(&format!("/channel/{}", last_id)).await)
+    Ok(redirect_to(&format!("/channel/{}", last_id)))
 }
 
 #[derive(Deserialize)]
@@ -593,7 +591,7 @@ async fn not_found() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
 }
 
-async fn redirect_to(path: &str) -> HttpResponse {
+fn redirect_to(path: &str) -> HttpResponse {
     HttpResponse::build(StatusCode::SEE_OTHER)
         .header(header::LOCATION, path)
         .finish()
@@ -607,16 +605,6 @@ where
     HttpResponse::build(StatusCode::OK)
         .content_type("text/html; charset=utf-8")
         .body(json)
-}
-
-/// response body
-async fn response_body(path: web::Path<String>) -> HttpResponse {
-    let text = format!("Hello {}!", *path);
-
-    let (tx, rx_body) = mpsc::channel();
-    let _ = tx.send(Ok::<_, Error>(Bytes::from(text)));
-
-    HttpResponse::Ok().streaming(rx_body)
 }
 
 #[actix_rt::main]
@@ -660,8 +648,6 @@ async fn main() -> io::Result<()> {
             .service(fetch_unread)
             .service(get_add_channel)
             .service(post_add_channel)
-            // async response body
-            .service(web::resource("/async-body/{name}").route(web::get().to(response_body)))
             .service(
                 web::resource("/test").to(|req: HttpRequest| match *req.method() {
                     Method::GET => HttpResponse::Ok(),
