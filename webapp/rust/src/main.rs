@@ -427,6 +427,34 @@ async fn query_channels(pool: &MySqlPool) -> anyhow::Result<Vec<i64>> {
     Ok(res)
 }
 
+#[derive(sqlx::FromRow, Serialize, Deserialize)]
+struct HaveRead {
+    user_id: i64,
+    channel_id: i64,
+    message_id: i64,
+    updated_at: NaiveDateTime,
+    created_at: NaiveDateTime,
+}
+
+async fn query_have_read(pool: &MySqlPool, user_id: i64, channel_id: i64) -> Result<i64> {
+    let haveread = sqlx::query_as::<_, HaveRead>(
+        "SELECT * FROM haveread WHERE user_id = ? AND channel_id = ?",
+    )
+    .bind(user_id)
+    .bind(channel_id)
+    .fetch_one(pool)
+    .await;
+
+    let message_id = match haveread {
+        Ok(x) => Ok(x.message_id),
+        Err(e) => match e {
+            sqlx::Error::RowNotFound => Ok(0),
+            err => Err(error::ErrorInternalServerError(err)),
+        },
+    }?;
+    Ok(message_id)
+}
+
 #[get("add_channel")]
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let pool = &data.db_pool;
