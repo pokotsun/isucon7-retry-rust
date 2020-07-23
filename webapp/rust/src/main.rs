@@ -499,6 +499,41 @@ async fn fetch_unread(session: Session, data: web::Data<Context>) -> Result<Http
     Ok(response_json(response))
 }
 
+async fn get_profile(
+    session: Session,
+    data: web::Data<Context>,
+    path: web::Path<(String,)>,
+) -> Result<HttpResponse> {
+    let user = ensure_login(&data, session).await;
+    if user.is_none() {
+        return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+    }
+    let user = user.unwrap();
+
+    let pool = &data.db_pool;
+    let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    let user_name = &path.0;
+    // TODO ErrNoRowsの実装
+    let other = sqlx::query_as::<_, User>("SELECT * FROM user WHERE name = ?")
+        .bind(user_name)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("channel_id", &0);
+    ctx.insert("channels", &channels);
+    ctx.insert("user", &user);
+    ctx.insert("other", &other);
+    ctx.insert("self_profile", &(user.id == other.id));
+
+    render(&data.templates, Some(ctx), "profile.html")
+}
+
 #[get("add_channel")]
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let pool = &data.db_pool;
@@ -646,6 +681,7 @@ async fn main() -> io::Result<()> {
             .service(get_message)
             .service(post_message)
             .service(fetch_unread)
+            .service(web::resource("/profile/{user_name}").route(web::get().to(get_profile)))
             .service(get_add_channel)
             .service(post_add_channel)
             .service(
