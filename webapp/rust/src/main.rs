@@ -4,7 +4,7 @@ extern crate rand;
 extern crate sqlx;
 extern crate tera;
 
-use std::{env, io};
+use std::{env, io, thread, time};
 
 use actix_files as fs;
 use actix_session::{CookieSession, Session};
@@ -411,10 +411,7 @@ async fn get_message(
         .await
         .map_err(|e| error::ErrorInternalServerError(e))?;
     }
-    let json = serde_json::to_string(&response).expect("can not convert to json from messages");
-    Ok(HttpResponse::build(StatusCode::OK)
-        .content_type("text/html; charset=utf-8")
-        .body(json))
+    Ok(response_json(response))
 }
 
 async fn query_channels(pool: &MySqlPool) -> anyhow::Result<Vec<i64>> {
@@ -453,6 +450,55 @@ async fn query_have_read(pool: &MySqlPool, user_id: i64, channel_id: i64) -> Res
         },
     }?;
     Ok(message_id)
+}
+
+#[derive(Serialize)]
+struct UnreadNum {
+    channel_id: i64,
+    unread: i64,
+}
+
+#[get("fetch")]
+async fn fetch_unread(session: Session, data: web::Data<Context>) -> Result<HttpResponse> {
+    let user_id = sess_user_id(&session);
+    if user_id.is_none() {
+        return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+    }
+    let user_id = user_id.unwrap();
+
+    thread::sleep(time::Duration::from_secs(1));
+
+    let pool = &data.db_pool;
+    let channels = query_channels(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    let mut response = Vec::new();
+    for ch_id in channels {
+        let last_id = query_have_read(pool, user_id, ch_id)
+            .await
+            .map_err(|e| error::ErrorInternalServerError(e))?;
+
+        let cnt = if last_id > 0 {
+            sqlx::query_as::<_, (i64,)>(
+                "SELECT COUNT(*) as cnt FROM message WHERE channel_id = ? AND ? < id",
+            )
+            .bind(ch_id)
+            .bind(last_id)
+        } else {
+            sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) AS cnt FROM message WHERE channel_id = ?")
+                .bind(ch_id)
+        }
+        .fetch_one(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?
+        .0;
+        response.push(UnreadNum {
+            channel_id: ch_id,
+            unread: cnt,
+        });
+    }
+    Ok(response_json(response))
 }
 
 #[get("add_channel")]
@@ -553,6 +599,16 @@ async fn redirect_to(path: &str) -> HttpResponse {
         .finish()
 }
 
+fn response_json<T>(response: T) -> HttpResponse
+where
+    T: serde::Serialize,
+{
+    let json = serde_json::to_string(&response).expect("can not convert to json from struct");
+    HttpResponse::build(StatusCode::OK)
+        .content_type("text/html; charset=utf-8")
+        .body(json)
+}
+
 /// response body
 async fn response_body(path: web::Path<String>) -> HttpResponse {
     let text = format!("Hello {}!", *path);
@@ -601,6 +657,7 @@ async fn main() -> io::Result<()> {
             .service(web::resource("/channel/{channel_id}").route(web::get().to(get_channel)))
             .service(get_message)
             .service(post_message)
+            .service(fetch_unread)
             .service(get_add_channel)
             .service(post_add_channel)
             // async response body
