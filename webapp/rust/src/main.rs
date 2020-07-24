@@ -161,27 +161,33 @@ async fn register(pool: &MySqlPool, name: &str, password: &str) -> anyhow::Resul
 #[get("initialize")]
 async fn get_initialize(data: web::Data<Context>) -> Result<HttpResponse> {
     let pool = &data.db_pool;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
     sqlx::query("DELETE FROM user WHERE id > 1000")
-        .execute(pool)
+        .execute(&mut tx)
+        .await
+        .and(
+            sqlx::query("DELETE FROM image WHERE id > 1001")
+                .execute(&mut tx)
+                .await,
+        )
+        .and(
+            sqlx::query("DELETE FROM channel WHERE id > 10")
+                .execute(&mut tx)
+                .await,
+        )
+        .and(
+            sqlx::query("DELETE FROM message WHERE id > 10000")
+                .execute(&mut tx)
+                .await,
+        )
+        .and(sqlx::query("DELETE FROM haveread").execute(&mut tx).await)
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+    tx.commit()
         .await
         .map_err(|e| error::ErrorInternalServerError(e))?;
-    sqlx::query("DELETE FROM image WHERE id > 1001")
-        .execute(pool)
-        .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-    sqlx::query("DELETE FROM channel WHERE id > 10")
-        .execute(pool)
-        .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-    sqlx::query("DELETE FROM message WHERE id > 10000")
-        .execute(pool)
-        .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-    sqlx::query("DELETE FROM haveread")
-        .execute(pool)
-        .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
-
     Ok(HttpResponse::new(StatusCode::NO_CONTENT))
 }
 
@@ -213,7 +219,7 @@ async fn get_channel(
 ) -> Result<HttpResponse> {
     let user = ensure_login(&data, session).await;
     if user.is_none() {
-        return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
+        return Err(error::ErrorForbidden("user not found"));
     }
     let channel_id = path.0;
     let pool = &data.db_pool;
@@ -263,7 +269,7 @@ async fn post_register(
     let name = &form.name;
     let pw = &form.password;
     if name == "" || pw == "" {
-        return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
+        return Err(error::ErrorBadRequest("register form is empty."));
     }
     let pool = &data.db_pool;
     // TODO Duplicated Id Errorの実装
@@ -295,20 +301,20 @@ async fn post_login(
     let name = &form.name;
     let pw = &form.password;
     if name == "" || pw == "" {
-        return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
+        return Err(error::ErrorBadRequest("login form is empty."));
     }
     let pool = &data.db_pool;
     let user = sqlx::query_as::<_, User>("SELECT * FROM user WHERE name = ?")
         .bind(name)
         .fetch_one(pool)
         .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
+        .map_err(|e| error::ErrorForbidden(e))?;
 
     let mut hasher = Sha1::new();
     hasher.input_str(&(user.salt.clone() + pw));
     let hex = hasher.result_str();
     if hex != user.password {
-        return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+        return Err(error::ErrorForbidden("login password is wrong"));
     }
     sess_set_user_id(&session, user.id as i64)?;
     Ok(redirect_to("/"))
@@ -334,13 +340,13 @@ async fn post_message(
 ) -> Result<HttpResponse> {
     let user = ensure_login(&data, session).await;
     if user.is_none() {
-        return Ok(HttpResponse::new(StatusCode::BAD_REQUEST));
+        return Err(error::ErrorBadRequest("message form is empty."));
     }
     let user = user.unwrap();
 
     let message = &form.message;
     if message == "" {
-        return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+        return Err(error::ErrorBadRequest("message is empty."));
     }
 
     let channel_id = form.channel_id;
@@ -460,7 +466,7 @@ struct UnreadNum {
 async fn fetch_unread(session: Session, data: web::Data<Context>) -> Result<HttpResponse> {
     let user_id = sess_user_id(&session);
     if user_id.is_none() {
-        return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+        return Err(error::ErrorForbidden("login error"));
     }
     let user_id = user_id.unwrap();
 
@@ -542,6 +548,7 @@ async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<H
     if user.is_none() {
         return Ok(redirect_to("/"));
     }
+    let user = user.unwrap();
 
     let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
         .fetch_all(pool)
@@ -579,7 +586,7 @@ async fn post_add_channel(
     let desc = &form.description;
 
     if name.is_empty() || desc.is_empty() {
-        return Ok(HttpResponse::BadRequest().finish());
+        return Err(error::ErrorBadRequest("channel form is empty"));
     }
 
     let mut tx = pool.begin().await.unwrap();
@@ -590,11 +597,11 @@ async fn post_add_channel(
     .bind(desc)
     .execute(&mut tx)
     .await.map_err(|e| error::ErrorInternalServerError(e))?;
-    let ret: (u64,) = sqlx::query_as("SELECT LAST_INSERT_ID()")
+    let last_id = sqlx::query_as::<_, (u64,)>("SELECT LAST_INSERT_ID()")
         .fetch_one(&mut tx)
         .await
-        .unwrap();
-    let last_id = ret.0;
+        .unwrap()
+        .0;
     tx.commit().await.unwrap();
     Ok(redirect_to(&format!("/channel/{}", last_id)))
 }
@@ -632,10 +639,7 @@ fn redirect_to(path: &str) -> HttpResponse {
         .finish()
 }
 
-fn response_json<T>(response: T) -> HttpResponse
-where
-    T: serde::Serialize,
-{
+fn response_json<T: serde::Serialize>(response: T) -> HttpResponse {
     let json = serde_json::to_string(&response).expect("can not convert to json from struct");
     HttpResponse::build(StatusCode::OK)
         .content_type("text/html; charset=utf-8")
