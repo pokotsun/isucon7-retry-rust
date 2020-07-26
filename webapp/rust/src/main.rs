@@ -505,6 +505,86 @@ async fn fetch_unread(session: Session, data: web::Data<Context>) -> Result<Http
     Ok(response_json(response))
 }
 
+#[derive(Deserialize)]
+struct PathChannelId {
+    channel_id: u64,
+}
+
+#[derive(Deserialize)]
+struct QueryPage {
+    page: Option<i64>,
+}
+
+async fn get_history(
+    session: Session,
+    data: web::Data<Context>,
+    query: web::Query<QueryPage>,
+    path_info: web::Path<PathChannelId>,
+) -> Result<HttpResponse> {
+    let user = ensure_login(&data, session).await;
+    if user.is_none() {
+        return Err(error::ErrorForbidden("login error"));
+    }
+    let user = user.unwrap();
+
+    let channel_id = path_info.channel_id;
+    let page = query.page.unwrap_or(1);
+    if page < 1 {
+        return Err(error::ErrorBadRequest("page is smaller than 1."));
+    }
+
+    let n = 20;
+    let pool = &data.db_pool;
+    let cnt =
+        sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) AS cnt FROM message WHERE channel_id = ?")
+            .bind(channel_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| error::ErrorInternalServerError(e))?
+            .0;
+    let mut max_page = (cnt + n - 1) / n;
+    if max_page == 0 {
+        max_page = 1;
+    }
+
+    if page > max_page {
+        return Err(error::ErrorBadRequest("page is bigger than max_page."));
+    }
+
+    let messages = sqlx::query_as::<_, Message>(
+        "SELECT * FROM message WHERE channel_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+    )
+    .bind(channel_id)
+    .bind(n)
+    .bind((page - 1) * n)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    let num_messages = messages.len();
+    let mut mjson = Vec::new();
+    for i in (0..num_messages).rev() {
+        let message = &messages[i];
+        let smessage = jsonify_message(pool, message).await;
+        mjson.push(smessage);
+    }
+
+    let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    let mut ctx = tera::Context::new();
+    ctx.insert("channel_id", &channel_id);
+    ctx.insert("channels", &channels);
+    ctx.insert("messages", &mjson);
+    ctx.insert("max_page", &max_page);
+    ctx.insert("page", &page);
+    ctx.insert("user", &user);
+
+    render(&data.templates, Some(ctx), "history.html")
+}
+
 async fn get_profile(
     session: Session,
     data: web::Data<Context>,
@@ -512,7 +592,7 @@ async fn get_profile(
 ) -> Result<HttpResponse> {
     let user = ensure_login(&data, session).await;
     if user.is_none() {
-        return Ok(HttpResponse::new(StatusCode::FORBIDDEN));
+        return Err(error::ErrorForbidden("login error"));
     }
     let user = user.unwrap();
 
@@ -685,6 +765,7 @@ async fn main() -> io::Result<()> {
             .service(get_message)
             .service(post_message)
             .service(fetch_unread)
+            .service(web::resource("/history/{channel_id}").route(web::get().to(get_history)))
             .service(web::resource("/profile/{user_name}").route(web::get().to(get_profile)))
             .service(get_add_channel)
             .service(post_add_channel)
