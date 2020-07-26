@@ -217,10 +217,9 @@ async fn get_channel(
     data: web::Data<Context>,
     path: web::Path<(i64,)>,
 ) -> Result<HttpResponse> {
-    let user = ensure_login(&data, session).await;
-    if user.is_none() {
-        return Err(error::ErrorForbidden("user not found"));
-    }
+    let user = ensure_login(&data, session)
+        .await
+        .ok_or(error::ErrorForbidden("user not found."))?;
     let channel_id = path.0;
     let pool = &data.db_pool;
 
@@ -338,11 +337,9 @@ async fn post_message(
     data: web::Data<Context>,
     form: web::Form<FormMessage>,
 ) -> Result<HttpResponse> {
-    let user = ensure_login(&data, session).await;
-    if user.is_none() {
-        return Err(error::ErrorBadRequest("message form is empty."));
-    }
-    let user = user.unwrap();
+    let user = ensure_login(&data, session)
+        .await
+        .ok_or(error::ErrorBadRequest("message form is empty."))?;
 
     let message = &form.message;
     if message == "" {
@@ -521,11 +518,9 @@ async fn get_history(
     query: web::Query<QueryPage>,
     path_info: web::Path<PathChannelId>,
 ) -> Result<HttpResponse> {
-    let user = ensure_login(&data, session).await;
-    if user.is_none() {
-        return Err(error::ErrorForbidden("login error"));
-    }
-    let user = user.unwrap();
+    let user = ensure_login(&data, session)
+        .await
+        .ok_or(error::ErrorForbidden("login error."))?;
 
     let channel_id = path_info.channel_id;
     let page = query.page.unwrap_or(1);
@@ -590,11 +585,9 @@ async fn get_profile(
     data: web::Data<Context>,
     path: web::Path<(String,)>,
 ) -> Result<HttpResponse> {
-    let user = ensure_login(&data, session).await;
-    if user.is_none() {
-        return Err(error::ErrorForbidden("login error"));
-    }
-    let user = user.unwrap();
+    let user = ensure_login(&data, session)
+        .await
+        .ok_or(error::ErrorForbidden("login error"))?;
 
     let pool = &data.db_pool;
     let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
@@ -624,11 +617,7 @@ async fn get_profile(
 async fn get_add_channel(data: web::Data<Context>, session: Session) -> Result<HttpResponse> {
     let pool = &data.db_pool;
 
-    let user = ensure_login(&data, session).await;
-    if user.is_none() {
-        return Ok(redirect_to("/"));
-    }
-    let user = user.unwrap();
+    let user = ensure_login(&data, session).await.ok_or(redirect_to("/"))?;
 
     let channels = sqlx::query_as::<_, ChannelInfo>("SELECT * FROM channel ORDER BY id")
         .fetch_all(pool)
@@ -657,10 +646,7 @@ async fn post_add_channel(
 ) -> Result<HttpResponse> {
     let pool = &data.db_pool;
 
-    let user = ensure_login(&data, session).await;
-    if user.is_none() {
-        return Ok(redirect_to("/"));
-    }
+    let user = ensure_login(&data, session).await.ok_or(redirect_to("/"))?;
 
     let name = &form.name;
     let desc = &form.description;
