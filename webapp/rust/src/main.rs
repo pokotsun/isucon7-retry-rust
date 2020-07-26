@@ -695,10 +695,6 @@ struct Message {
     created_at: NaiveDateTime,
 }
 
-async fn not_found() -> Result<fs::NamedFile> {
-    Ok(fs::NamedFile::open("static/404.html")?.set_status_code(StatusCode::NOT_FOUND))
-}
-
 fn redirect_to(path: &str) -> HttpResponse {
     HttpResponse::build(StatusCode::SEE_OTHER)
         .header(header::LOCATION, path)
@@ -755,33 +751,8 @@ async fn main() -> io::Result<()> {
             .service(web::resource("/profile/{user_name}").route(web::get().to(get_profile)))
             .service(get_add_channel)
             .service(post_add_channel)
-            .service(
-                web::resource("/test").to(|req: HttpRequest| match *req.method() {
-                    Method::GET => HttpResponse::Ok(),
-                    Method::POST => HttpResponse::MethodNotAllowed(),
-                    _ => HttpResponse::NotFound(),
-                }),
-            )
-            .service(web::resource("/error").to(|| async {
-                error::InternalError::new(
-                    io::Error::new(io::ErrorKind::Other, "test"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                )
-            }))
             // static files
             .service(fs::Files::new("", "../public").show_files_listing())
-            // default
-            .default_service(
-                // 404 for GET request
-                web::resource("")
-                    .route(web::get().to(not_found))
-                    // all requests that are not `GET`
-                    .route(
-                        web::route()
-                            .guard(guard::Not(guard::Get()))
-                            .to(HttpResponse::MethodNotAllowed),
-                    ),
-            )
     })
     .bind("127.0.0.1:5000")?
     .run()
