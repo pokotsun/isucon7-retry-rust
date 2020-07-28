@@ -8,10 +8,12 @@ use std::{env, io, thread, time};
 
 use actix_files as fs;
 use actix_session::{CookieSession, Session};
-use actix_web::http::{header, Method, StatusCode};
+use actix_web::http::{header, StatusCode};
 use actix_web::{
-    error, guard, middleware, web, App, HttpRequest, HttpResponse, HttpServer, Result,
+    error, middleware, web, App, HttpResponse, HttpServer, Result,
 };
+use actix_multipart::Multipart;
+use futures::{StreamExt, TryStreamExt};
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -82,7 +84,6 @@ async fn query_messages(
     chan_id: i64,
     last_id: i64,
 ) -> anyhow::Result<Vec<Message>> {
-    println!("chan_id: {}, last_id: {}", chan_id, last_id);
     let msgs = sqlx::query_as::<_, Message>(
         "SELECT * FROM message WHERE id > ? AND channel_id = ? ORDER BY id DESC LIMIT 100",
     )
@@ -672,6 +673,27 @@ async fn post_add_channel(
     Ok(redirect_to(&format!("/channel/{}", last_id)))
 }
 
+#[post("profile")]
+async fn post_profile(session: Session, data: web::Data<Context>, mut payload: Multipart) -> Result<HttpResponse> {
+    let user = ensure_login(&data, session).await.ok_or(error::ErrorForbidden("login error"))?;
+
+    while let Ok(Some(mut field)) = payload.try_next().await {
+        let content_type = field.content_disposition().unwrap();
+        let name = content_type.get_name().unwrap();
+        println!("content_type: {}", content_type);
+        println!("name: {}", name);
+        if let Some(filename) = content_type.get_filename() {
+            println!("filename: {}", filename);
+        }
+
+        while let Some(chunk) = field.next().await {
+            let data = chunk.unwrap();
+            // println!("data: {}", data);
+        }
+    }
+    Ok(HttpResponse::new(StatusCode::OK))
+}
+
 #[derive(Deserialize)]
 struct QueryMessage {
     channel_id: i64,
@@ -751,6 +773,7 @@ async fn main() -> io::Result<()> {
             .service(web::resource("/profile/{user_name}").route(web::get().to(get_profile)))
             .service(get_add_channel)
             .service(post_add_channel)
+            .service(post_profile)
             // static files
             .service(fs::Files::new("", "../public").show_files_listing())
     })
