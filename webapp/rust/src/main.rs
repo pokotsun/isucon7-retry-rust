@@ -4,15 +4,13 @@ extern crate rand;
 extern crate sqlx;
 extern crate tera;
 
-use std::{env, io, thread, time};
+use std::{env, ffi, io, path, thread, time};
 
 use actix_files as fs;
+use actix_multipart::Multipart;
 use actix_session::{CookieSession, Session};
 use actix_web::http::{header, StatusCode};
-use actix_web::{
-    error, middleware, web, App, HttpResponse, HttpServer, Result,
-};
-use actix_multipart::Multipart;
+use actix_web::{error, middleware, web, App, HttpResponse, HttpServer, Result};
 use futures::{StreamExt, TryStreamExt};
 
 use chrono::NaiveDateTime;
@@ -23,6 +21,8 @@ use tera::Tera;
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
 use rand::seq::SliceRandom;
+
+const AVATAR_MAX_BYTES: usize = 1 * 1024 * 1024;
 
 struct Context {
     db_pool: MySqlPool,
@@ -647,7 +647,7 @@ async fn post_add_channel(
 ) -> Result<HttpResponse> {
     let pool = &data.db_pool;
 
-    let user = ensure_login(&data, session).await.ok_or(redirect_to("/"))?;
+    ensure_login(&data, session).await.ok_or(redirect_to("/"))?;
 
     let name = &form.name;
     let desc = &form.description;
@@ -674,24 +674,69 @@ async fn post_add_channel(
 }
 
 #[post("profile")]
-async fn post_profile(session: Session, data: web::Data<Context>, mut payload: Multipart) -> Result<HttpResponse> {
-    let user = ensure_login(&data, session).await.ok_or(error::ErrorForbidden("login error"))?;
+async fn post_profile(
+    session: Session,
+    data: web::Data<Context>,
+    mut payload: Multipart,
+) -> Result<HttpResponse> {
+    let user = ensure_login(&data, session)
+        .await
+        .ok_or(error::ErrorForbidden("login error"))?;
+    let uid = user.id;
 
+    let pool = &data.db_pool;
     while let Ok(Some(mut field)) = payload.try_next().await {
         let content_type = field.content_disposition().unwrap();
-        let name = content_type.get_name().unwrap();
-        println!("content_type: {}", content_type);
-        println!("name: {}", name);
-        if let Some(filename) = content_type.get_filename() {
-            println!("filename: {}", filename);
-        }
 
-        while let Some(chunk) = field.next().await {
-            let data = chunk.unwrap();
-            // println!("data: {}", data);
+        match content_type.get_name().unwrap() {
+            "display_name" => {
+                let data = field.next().await.unwrap().unwrap();
+                let name = String::from_utf8(data.to_vec()).unwrap();
+                sqlx::query("UPDATE user SET display_name = ? WHERE id = ?")
+                    .bind(name)
+                    .bind(uid)
+                    .execute(pool)
+                    .await
+                    .map_err(|e| error::ErrorInternalServerError(e))?;
+            }
+            "avatar_icon" => {
+                let file_name = content_type.get_filename().unwrap();
+                let ext = path::Path::new(file_name)
+                    .extension()
+                    .and_then(ffi::OsStr::to_str)
+                    .unwrap();
+                if !["jpg", "jpeg", "png", "gif"].contains(&ext) {
+                    return Err(error::ErrorBadRequest("file extension is not valid."));
+                }
+                let data = field.next().await.unwrap().unwrap().to_vec();
+                if data.len() > AVATAR_MAX_BYTES {
+                    return Err(error::ErrorBadRequest("posted img size is too big."));
+                }
+                let mut hasher = Sha1::new();
+                hasher.input(&data);
+                let hex = hasher.result_str();
+
+                let avatar_name = format!("{}.{}", hex, ext);
+                if !avatar_name.is_empty() && data.len() > 0 {
+                    sqlx::query("INSERT INTO image (name, data) VALUES (?, ?)")
+                        .bind(&avatar_name)
+                        .bind(data)
+                        .execute(pool)
+                        .await
+                        .and(
+                            sqlx::query("UPDATE user SET avatar_icon = ? WHERE id = ?")
+                                .bind(&avatar_name)
+                                .bind(uid)
+                                .execute(pool)
+                                .await,
+                        )
+                        .map_err(|e| error::ErrorInternalServerError(e))?;
+                }
+            }
+            _ => {}
         }
     }
-    Ok(HttpResponse::new(StatusCode::OK))
+    Ok(redirect_to("/"))
 }
 
 #[derive(Deserialize)]
