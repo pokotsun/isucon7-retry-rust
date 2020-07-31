@@ -581,6 +581,7 @@ async fn get_history(
     render(&data.templates, Some(ctx), "history.html")
 }
 
+// GET /profile/:user_name
 async fn get_profile(
     session: Session,
     data: web::Data<Context>,
@@ -712,6 +713,7 @@ async fn post_profile(
                 if data.len() > AVATAR_MAX_BYTES {
                     return Err(error::ErrorBadRequest("posted img size is too big."));
                 }
+
                 let mut hasher = Sha1::new();
                 hasher.input(&data);
                 let hex = hasher.result_str();
@@ -737,6 +739,41 @@ async fn post_profile(
         }
     }
     Ok(redirect_to("/"))
+}
+#[derive(Deserialize)]
+struct PathFileName {
+    file_name: String,
+}
+
+#[derive(sqlx::FromRow, Serialize, Deserialize)]
+struct Image {
+    name: String,
+    data: Vec<u8>,
+}
+
+// GET /icons/:file_name
+async fn get_icon(data: web::Data<Context>, path: web::Path<PathFileName>) -> Result<HttpResponse> {
+    let pool = &data.db_pool;
+    let file_name = &path.file_name;
+    let img = sqlx::query_as::<_, Image>("SELECT name, data FROM image WHERE name = ?")
+        .bind(file_name)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(e))?;
+
+    let ext = path::Path::new(&img.name)
+        .extension()
+        .and_then(ffi::OsStr::to_str)
+        .unwrap();
+
+    let mime = match ext {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        _ => return Err(error::ErrorNotFound("requested image not found.")),
+    };
+
+    Ok(HttpResponse::Ok().content_type(mime).body(img.data))
 }
 
 #[derive(Deserialize)]
@@ -816,9 +853,10 @@ async fn main() -> io::Result<()> {
             .service(fetch_unread)
             .service(web::resource("/history/{channel_id}").route(web::get().to(get_history)))
             .service(web::resource("/profile/{user_name}").route(web::get().to(get_profile)))
+            .service(post_profile)
             .service(get_add_channel)
             .service(post_add_channel)
-            .service(post_profile)
+            .service(web::resource("/icons/{file_name}").route(web::get().to(get_icon)))
             // static files
             .service(fs::Files::new("", "../public").show_files_listing())
     })
