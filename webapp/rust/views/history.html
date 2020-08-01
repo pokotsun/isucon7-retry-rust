@@ -17,7 +17,7 @@
 	{% if page != 1 %}
     <li><a href="/history/{{channel_id}}?page={{page - 1}}"><span>«</span></a></li>
     {% endif %}
-	{% for p in range(start=1, end=max_page) %}
+	{% for p in range(start=1, end=max_page+1) %}
       {% if p == page %}<li class="active">{% else %}<li>{% endif %}
       <a href="/history/{{ channel_id  }}?page={{ p }}">{{ p }}</a></li>
     {% endfor %}
