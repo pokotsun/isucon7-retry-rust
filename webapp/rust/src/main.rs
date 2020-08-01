@@ -598,12 +598,14 @@ async fn get_profile(
         .map_err(|e| error::ErrorInternalServerError(e))?;
 
     let user_name = &path.0;
-    // TODO ErrNoRowsの実装
     let other = sqlx::query_as::<_, User>("SELECT * FROM user WHERE name = ?")
         .bind(user_name)
         .fetch_one(pool)
         .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => error::ErrorNotFound("required user not found."),
+            e => error::ErrorInternalServerError(e),
+        })?;
 
     let mut ctx = tera::Context::new();
     ctx.insert("channel_id", &0);
@@ -759,7 +761,10 @@ async fn get_icon(data: web::Data<Context>, path: web::Path<PathFileName>) -> Re
         .bind(file_name)
         .fetch_one(pool)
         .await
-        .map_err(|e| error::ErrorInternalServerError(e))?;
+        .map_err(|err| match err {
+            sqlx::Error::RowNotFound => error::ErrorNotFound("image not found."),
+            e => error::ErrorInternalServerError(e),
+        })?;
 
     let ext = path::Path::new(&img.name)
         .extension()
