@@ -410,7 +410,7 @@ async fn get_message(
         .await
         .map_err(|e| error::ErrorInternalServerError(e))?;
     }
-    Ok(response_json(response))
+    Ok(HttpResponse::Ok().json(response))
 }
 
 async fn query_channels(pool: &MySqlPool) -> anyhow::Result<Vec<i64>> {
@@ -493,7 +493,7 @@ async fn fetch_unread(session: Session, data: web::Data<Context>) -> Result<Http
             unread: cnt,
         });
     }
-    Ok(response_json(response))
+    Ok(HttpResponse::Ok().json(response))
 }
 
 #[derive(Deserialize)]
@@ -792,13 +792,6 @@ fn redirect_to(path: &str) -> HttpResponse {
     HttpResponse::build(StatusCode::SEE_OTHER)
         .header(header::LOCATION, path)
         .finish()
-}
-
-fn response_json<T: serde::Serialize>(response: T) -> HttpResponse {
-    let json = serde_json::to_string(&response).expect("can not convert to json from struct");
-    HttpResponse::build(StatusCode::OK)
-        .content_type("text/html; charset=utf-8")
-        .body(json)
 }
 
 #[actix_rt::main]
