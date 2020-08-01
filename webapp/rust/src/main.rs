@@ -28,6 +28,7 @@ struct Context {
     db_pool: MySqlPool,
     templates: tera::Tera,
 }
+
 fn render(templates: &tera::Tera, ctx: Option<tera::Context>, name: &str) -> Result<HttpResponse> {
     let ctx = ctx.map_or(tera::Context::new(), |v| v);
     let view = templates
@@ -272,7 +273,6 @@ async fn post_register(
         return Err(error::ErrorBadRequest("register form is empty."));
     }
     let pool = &data.db_pool;
-    // TODO Duplicated Id Errorの実装
     let user_id = register(pool, &name, &pw)
         .await
         .map_err(|e| error::ErrorInternalServerError(e))?;
@@ -376,10 +376,7 @@ async fn get_message(
     data: web::Data<Context>,
     query: web::Query<QueryMessage>,
 ) -> Result<HttpResponse> {
-    let user_id = sess_user_id(&session);
-    if user_id.is_none() {
-        return Ok(HttpResponse::new(StatusCode::NO_CONTENT));
-    }
+    let user_id = sess_user_id(&session).ok_or(HttpResponse::new(StatusCode::NO_CONTENT))?;
 
     let pool = &data.db_pool;
     let channel_id = query.channel_id;
@@ -462,11 +459,7 @@ struct UnreadNum {
 
 #[get("fetch")]
 async fn fetch_unread(session: Session, data: web::Data<Context>) -> Result<HttpResponse> {
-    let user_id = sess_user_id(&session);
-    if user_id.is_none() {
-        return Err(error::ErrorForbidden("login error"));
-    }
-    let user_id = user_id.unwrap();
+    let user_id = sess_user_id(&session).ok_or(error::ErrorForbidden("login error"))?;
 
     thread::sleep(time::Duration::from_secs(1));
 
@@ -485,8 +478,8 @@ async fn fetch_unread(session: Session, data: web::Data<Context>) -> Result<Http
             sqlx::query_as::<_, (i64,)>(
                 "SELECT COUNT(*) as cnt FROM message WHERE channel_id = ? AND ? < id",
             )
-            .bind(ch_id)
-            .bind(last_id)
+                .bind(ch_id)
+                .bind(last_id)
         } else {
             sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) AS cnt FROM message WHERE channel_id = ?")
                 .bind(ch_id)
@@ -504,11 +497,6 @@ async fn fetch_unread(session: Session, data: web::Data<Context>) -> Result<Http
 }
 
 #[derive(Deserialize)]
-struct PathChannelId {
-    channel_id: u64,
-}
-
-#[derive(Deserialize)]
 struct QueryPage {
     page: Option<i64>,
 }
@@ -517,13 +505,13 @@ async fn get_history(
     session: Session,
     data: web::Data<Context>,
     query: web::Query<QueryPage>,
-    path_info: web::Path<PathChannelId>,
+    path_info: web::Path<(u64,)>,
 ) -> Result<HttpResponse> {
     let user = ensure_login(&data, session)
         .await
         .ok_or(error::ErrorForbidden("login error."))?;
 
-    let channel_id = path_info.channel_id;
+    let channel_id = path_info.0;
     let page = query.page.unwrap_or(1);
     if page < 1 {
         return Err(error::ErrorBadRequest("page is smaller than 1."));
@@ -602,9 +590,9 @@ async fn get_profile(
         .bind(user_name)
         .fetch_one(pool)
         .await
-        .map_err(|err| match err {
+        .map_err(|e| match e {
             sqlx::Error::RowNotFound => error::ErrorNotFound("required user not found."),
-            e => error::ErrorInternalServerError(e),
+            _ => error::ErrorInternalServerError(e),
         })?;
 
     let mut ctx = tera::Context::new();
@@ -742,10 +730,6 @@ async fn post_profile(
     }
     Ok(redirect_to("/"))
 }
-#[derive(Deserialize)]
-struct PathFileName {
-    file_name: String,
-}
 
 #[derive(sqlx::FromRow, Serialize, Deserialize)]
 struct Image {
@@ -754,9 +738,9 @@ struct Image {
 }
 
 // GET /icons/:file_name
-async fn get_icon(data: web::Data<Context>, path: web::Path<PathFileName>) -> Result<HttpResponse> {
+async fn get_icon(data: web::Data<Context>, path: web::Path<(String,)>) -> Result<HttpResponse> {
     let pool = &data.db_pool;
-    let file_name = &path.file_name;
+    let file_name = &path.0;
     let img = sqlx::query_as::<_, Image>("SELECT name, data FROM image WHERE name = ?")
         .bind(file_name)
         .fetch_one(pool)
@@ -824,7 +808,7 @@ async fn main() -> io::Result<()> {
 
     // database connection
     let database_url =
-        "mysql://isucon:isucon@192.168.33.10:3306/isubata?parseTime=true&loc=Local&charset=utf8mb4";
+        "mysql://isucon:isucon@127.0.0.1:3306/isubata?parseTime=true&loc=Local&charset=utf8mb4";
     let pool = MySqlPool::builder()
         .max_size(5) // maximum number of connections in the pool
         .build(&database_url)
@@ -836,12 +820,10 @@ async fn main() -> io::Result<()> {
         let templates = Tera::new("views/*").unwrap();
 
         App::new()
-            // setup DB pool to be used with web::Data<Pool> extractor
             .data(Context {
                 db_pool: pool.clone(),
                 templates: templates.clone(),
             })
-            // cookie session middleware
             .wrap(CookieSession::signed(&[0; 32]).secure(false))
             // enable logger - always register actix-web Logger middleware last
             .wrap(middleware::Logger::default())
