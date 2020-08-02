@@ -96,7 +96,7 @@ async fn query_messages(
 }
 
 fn sess_user_id(session: &Session) -> Option<i64> {
-    session.get::<i64>("user_id").map_or(None, |v| v)
+    session.get::<i64>("user_id").ok().flatten()
 }
 
 fn sess_set_user_id(session: &Session, id: i64) -> Result<()> {
